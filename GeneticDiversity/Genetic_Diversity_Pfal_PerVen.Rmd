@@ -1,0 +1,201 @@
+---
+title: "Genetic Diversity"
+author: "Paulo Manrique"
+date: "2023-05-27"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: 72
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Background
+
+```{r, include=F}
+setwd('~/Documents/Github/Plasmodium_WGS_analysis/GeneticDiversity/')
+load('PerVen_Pfal_filtered_rGenome.RData')
+source('../functions_libraries/load_libraries.R')
+source('../functions_libraries/functions.R')
+sourceCpp('../functions_libraries/Rcpp_functions.cpp')
+```
+
+## Handel Polyclonal infections
+
+Create two objects containing the list of samples that are monoclonals and polyclonals
+```{r}
+monoclonals = Pfal_rGenome_object@data$metadata$Sample_id
+
+polyclonals = Pfal_rGenome_object@data$metadata$Sample_id
+```
+
+Calculate the expected heterozygosity assuming that all samples are diploids
+```{r}
+Pfal_rGenome_object@data$loci_table$ExpHet_all_as_diploid = 
+  get_ExpHet(obj = Pfal_rGenome_object, update_AC = T, monoclonals = NULL, polyclonals = polyclonals)
+```
+
+Calculate the expected heterozygosity considering that all samples are monoclonals, it means that secondary alleles won't be included
+```{r}
+Pfal_rGenome_object@data$loci_table$ExpHet_all_as_haploid = 
+  get_ExpHet(obj = Pfal_rGenome_object, update_AC = T, monoclonals = monoclonals)
+```
+
+Calculate the expected heterozygosity defining the ploidy of each position individually
+```{r}
+Pfal_rGenome_object@data$loci_table$ExpHet_default = get_ExpHet(obj = Pfal_rGenome_object)
+```
+
+
+Create a plot of ExpHet using the different approaches
+```{r}
+Pfal_rGenome_object@data$loci_table %>%
+  pivot_longer(cols = c('ExpHet_all_as_haploid', 'ExpHet_default'), names_to = 'Treatment', values_to = 'ExpHet')%>%
+  ggplot(aes(x = ExpHet_all_as_diploid, y = ExpHet))+
+  geom_point(alpha = .1)+
+  facet_grid(.~Treatment)+
+  theme_bw()
+
+```
+Create a plot of the distribution of ExpHet by by type of marker
+```{r}
+
+Pfal_rGenome_object@data$loci_table %>%
+  pivot_longer(cols = c('ExpHet_all_as_diploid','ExpHet_all_as_haploid', 'ExpHet_default'), names_to = 'Treatment', values_to = 'ExpHet')%>%
+  ggplot(aes(fill = Treatment, x = ExpHet))+
+  geom_histogram(alpha = .4)+
+  facet_grid(TypeOf_Markers~Treatment, scales = 'free_y')+
+  theme_bw()
+
+```
+
+Calculate Heterozygosity by each population (Subnational_level0: Regions within Colombia)
+```{r}
+
+Pfal_rGenome_object@data$metadata[is.na(Pfal_rGenome_object@data$metadata$Country),][['Country']] = 'Perú'
+
+ExpHet_by_Pop= 
+  get_ExpHet(obj = Pfal_rGenome_object, update_AC = T, monoclonals = NULL, polyclonals = polyclonals, by = 'Country')
+
+
+```
+
+```{r}
+
+ExpHet_by_Pop %>%
+  pivot_longer(cols = c('Perú', 'Venezuela'), names_to = 'Region', values_to = 'ExpHet')%>%
+  ggplot(aes(fill = Region, x = ExpHet))+
+  geom_histogram(alpha = .4)+
+  facet_grid(TypeOf_Markers~Region, scales = 'free_y')+
+  theme_bw()
+
+```
+
+## Nucleotide diversity
+
+Calculate Nuc. Div. by gene by Population (Subnational_level0)
+```{r}
+pi_by_gene_by_country = get_nuc_div(Pfal_rGenome_object, polyclonals = polyclonals, gff = '../reference/PlasmoDB-59_Pfalciparum3D7.gff', type_of_region = 'gene', window = NULL, by = 'Country')
+```
+
+
+```{r}
+
+mhp_pi_by_gene_by_country = pi_by_gene_by_country %>%
+  pivot_longer(cols = c('Perú_pi', 'Venezuela_pi', 'Total_pi'), names_to = 'Regions', values_to = 'pi')%>%
+  mutate(CHROM2  = gsub('(^Pf3D7_|_v3)', '',seqid))%>%
+  ggplot(aes(x = start, y = pi, color = Regions)) +
+    geom_point(alpha = 0.5, size = .25) +
+    scale_color_manual(values = c('dodgerblue3', 'firebrick3', 'gray40'))+
+    facet_grid(Regions ~ CHROM2, scales = 'free_x')+
+    theme_minimal()+
+    labs(y = 'Nuc. Div.', x = 'Chromosomal position', color = 'Region')+
+    theme(legend.position = 'right',
+          axis.text.x = element_blank(),
+          axis.title.x = element_blank())
+
+mhp_pi_by_gene_by_country
+```
+
+```{r}
+
+mhp_pi_by_gene_by_country = ggplotly(mhp_pi_by_gene_by_country)
+
+chromosomes = c('Pf3D7_01_v3', 'Pf3D7_02_v3', 'Pf3D7_03_v3', 'Pf3D7_04_v3',
+                'Pf3D7_05_v3', 'Pf3D7_06_v3', 'Pf3D7_07_v3', 'Pf3D7_08_v3',
+                'Pf3D7_09_v3', 'Pf3D7_10_v3', 'Pf3D7_11_v3', 'Pf3D7_12_v3',
+                'Pf3D7_13_v3', 'Pf3D7_14_v3', 'Pf3D7_API_v3', 'Pf3D7_MIT_v3')
+
+for(region in 1:3){
+  for(chrom in 1:16){
+    mhp_pi_by_gene_by_country$x$data[[chrom + (region - 1)*16]]$text = paste(mhp_pi_by_gene_by_country$x$data[[chrom + (region - 1)*16]]$text,
+      pi_by_gene_by_country[pi_by_gene_by_country$seqid == chromosomes[chrom],]$gene_description, sep = '<br />')
+  }
+}
+
+
+mhp_pi_by_gene_by_country
+
+```
+
+## Genetic differentiation
+
+```{r}
+
+pca_PerVen = fastGRM(obj = Pfal_rGenome_object, k = 2, polyclonals = polyclonals, Pop = 'Country')
+
+pca_PerVen  %>% ggplot(aes(x = PC1, y = PC2, color = Country))+
+  geom_point(alpha = .7, size = 2) +
+  stat_ellipse(level = .6)+
+  scale_color_manual(values = c('dodgerblue3', 'firebrick3'))+
+  theme_bw()+
+  labs(title = 'WGS - PerVen',
+       color = 'Regions')
+
+```
+
+Genetic Differentiation within Peru
+```{r}
+Pfal_rGenome_object_Peru = filter_samples(Pfal_rGenome_object, v = 
+                                          Pfal_rGenome_object@data$metadata$Country == 'Perú')
+
+polyclonals_per = Pfal_rGenome_object_Peru@data$metadata$Sample_id
+
+pca_Per = fastGRM(obj = Pfal_rGenome_object_Peru, k = 2, polyclonals = polyclonals_per, Pop = 'Subnational_level0')
+
+pca_Per  %>% ggplot(aes(x = PC1, y = PC2, color = Subnational_level0))+
+  geom_point(alpha = .7, size = 2) +
+  stat_ellipse(level = .6)+
+  theme_bw()+
+  labs(title = 'WGS - Per',
+       color = 'Regions')
+
+```
+
+Genetic Differentiation within Peru
+```{r}
+Pfal_rGenome_object_Ven = filter_samples(Pfal_rGenome_object, v = 
+                                          Pfal_rGenome_object@data$metadata$Country == 'Venezuela')
+
+
+polyclonals_ven = Pfal_rGenome_object_Ven@data$metadata$Sample_id
+
+pca_Ven = fastGRM(obj = Pfal_rGenome_object_Ven, k = 2, polyclonals = polyclonals_ven, Pop = 'Subnational_level2')
+
+
+pca_Ven  %>% ggplot(aes(x = PC1, y = PC2, color = Subnational_level2))+
+  geom_point(alpha = .7, size = 2) +
+  stat_ellipse(level = .6)+
+  theme_bw()+
+  labs(title = 'WGS - Ven',
+       color = 'Regions')
+
+```

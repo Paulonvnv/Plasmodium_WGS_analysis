@@ -2,3 +2,12 @@
 .Rhistory
 .RData
 .Ruserdata
+GADMTools/
+DataManagment/
+GeneticDiversity/ColombiaGates_filtered_rGenome.RData
+GeneticDiversity/PerVen_Pfal_filtered_rGenome.RData
+GeneticDiversity/PerVen_Pviv_filtered_rGenome.RData
+GeneticDiversity/merged_metadata.csv
+Pre_filtering/Colombia/ColombiaGates_1st_2nd_filters.RData
+Pre_filtering/PerVen/Pfal
+Pre_filtering/PerVen/Pviv

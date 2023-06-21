@@ -1,0 +1,228 @@
+---
+title: "Genetic Diversity"
+author: "Paulo Manrique"
+date: "2023-05-27"
+output:
+  html_document:
+    toc: true
+    number_sections: true
+    toc_float: true
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: 72
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Background
+
+```{r, include=F}
+setwd('~/Documents/Github/Plasmodium_WGS_analysis/GeneticDiversity/')
+load('PerVen_Pviv_filtered_rGenome.RData')
+source('../functions_libraries/load_libraries.R')
+source('../functions_libraries/functions.R')
+sourceCpp('../functions_libraries/Rcpp_functions.cpp')
+```
+
+## Handel Polyclonal infections
+
+Create two objects containing the list of samples that are monoclonals and polyclonals
+```{r}
+monoclonals = Pviv_rGenome_object@data$metadata %>% 
+  filter(Clonality %in% c('Highly related Polyclonal')) %>%
+  select(Sample_id) %>% unlist()
+
+polyclonals = Pviv_rGenome_object@data$metadata %>% 
+  filter(Clonality %in% c('Polyclonal')) %>%
+  select(Sample_id) %>% unlist()
+```
+
+Create a new rGenome object that only has the information of monoclonals samples
+```{r}
+Pviv_rGenome_object_mono = filter_samples(
+      Pviv_rGenome_object , 
+      v = Pviv_rGenome_object@data$metadata$Sample_id %in% monoclonals)
+```
+Calculate the expected heterozygosity assuming that all samples are diploids
+```{r}
+Pviv_rGenome_object@data$loci_table$ExpHet_all_as_diploid = 
+  get_ExpHet(obj = Pviv_rGenome_object, update_AC = T, monoclonals = NULL, polyclonals = c(monoclonals, polyclonals))
+```
+
+Calculate the expected heterozygosity considering that all samples are monoclonals, it means that secondary alleles won't be included
+```{r}
+Pviv_rGenome_object@data$loci_table$ExpHet_all_as_haploid = 
+  get_ExpHet(obj = Pviv_rGenome_object, update_AC = T, monoclonals = c(monoclonals, polyclonals))
+```
+
+Calculate the expected heterozygosity considering only monoclonal samples
+```{r}
+Pviv_rGenome_object@data$loci_table$ExpHet_only_monoclonals = 
+  get_ExpHet(
+    Pviv_rGenome_object_mono, 
+    update_AC = T, 
+    monoclonals = monoclonals)
+```
+
+Calculate the expected heterozygosity defining the ploidy of each position individually
+```{r}
+Pviv_rGenome_object@data$loci_table$ExpHet_default = get_ExpHet(obj = Pviv_rGenome_object)
+```
+
+Calculate the expected heterozygosity defining the ploidy of each samples based on our previous classification. It means that in monoclonal samples secondary alleles will be removed, while in polyclonal samples all observed alleles will be included
+```{r}
+Pviv_rGenome_object@data$loci_table$ExpHet_default2 = 
+  get_ExpHet(obj = Pviv_rGenome_object, update_AC = T, monoclonals = monoclonals, polyclonals = polyclonals)
+```
+
+Create a plot of ExpHet using the different approaches
+```{r}
+Pviv_rGenome_object@data$loci_table %>%
+  pivot_longer(cols = c('ExpHet_all_as_haploid', 'ExpHet_only_monoclonals', 'ExpHet_default', 'ExpHet_default2'), names_to = 'Treatment', values_to = 'ExpHet')%>%
+  ggplot(aes(x = ExpHet_all_as_diploid, y = ExpHet))+
+  geom_point(alpha = .1)+
+  facet_grid(.~Treatment)+
+  theme_bw()
+
+```
+Create a plot of the distribution of ExpHet by by type of marker
+```{r}
+
+Pviv_rGenome_object@data$loci_table %>%
+  pivot_longer(cols = c('ExpHet_all_as_diploid','ExpHet_all_as_haploid', 'ExpHet_only_monoclonals', 'ExpHet_default', 'ExpHet_default2'), names_to = 'Treatment', values_to = 'ExpHet')%>%
+  ggplot(aes(fill = Treatment, x = ExpHet))+
+  geom_histogram(alpha = .4)+
+  facet_grid(TypeOf_Markers~Treatment, scales = 'free_y')+
+  theme_bw()
+
+```
+
+Calculate Heterozygosity by each population (Subnational_level0: Regions within Colombia)
+```{r}
+
+ExpHet_by_Pop= 
+  get_ExpHet(obj = Pviv_rGenome_object, update_AC = T, monoclonals = NULL, polyclonals = NULL, by = 'Country')
+
+
+```
+
+```{r}
+
+ExpHet_by_Pop %>%
+  pivot_longer(cols = c('Perú', 'Venezuela'), names_to = 'Region', values_to = 'ExpHet')%>%
+  ggplot(aes(fill = Region, x = ExpHet))+
+  geom_histogram(alpha = .4)+
+  facet_grid(TypeOf_Markers~Region, scales = 'free_y')+
+  theme_bw()
+
+```
+
+## Nucleotide diversity
+
+Calculate Nuc. Div. by gene by Population (Subnational_level0)
+```{r}
+pi_by_gene_by_country = get_nuc_div(Pviv_rGenome_object, monoclonals = monoclonals, polyclonals = polyclonals, gff = '../reference/genes.gff', type_of_region = 'gene', window = NULL, by = 'Country')
+```
+
+
+```{r}
+
+mhp_pi_by_gene_by_country = pi_by_gene_by_country %>%
+  pivot_longer(cols = c('Perú_pi', 'Venezuela_pi', 'Total_pi'), names_to = 'Regions', values_to = 'pi')%>%
+  mutate(CHROM2  = gsub('(^(\\d|P|v)+_|_v1)', '',seqid))%>%
+  ggplot(aes(x = start, y = pi, color = Regions)) +
+    geom_point(alpha = 0.5, size = .25) +
+    scale_color_manual(values = c('dodgerblue3', 'firebrick3', 'gray40'))+
+    facet_grid(Regions ~ CHROM2, scales = 'free_x')+
+    theme_minimal()+
+    labs(y = 'Nuc. Div.', x = 'Chromosomal position', color = 'Region')+
+    theme(legend.position = 'right',
+          axis.text.x = element_blank(),
+          axis.title.x = element_blank())
+
+mhp_pi_by_gene_by_country
+```
+
+```{r}
+
+mhp_pi_by_gene_by_country = ggplotly(mhp_pi_by_gene_by_country)
+
+chromosomes = c('PvP01_01_v1', 'PvP01_02_v1', 'PvP01_03_v1', 'PvP01_04_v1',
+                'PvP01_05_v1', 'PvP01_06_v1', 'PvP01_07_v1', 'PvP01_08_v1',
+                'PvP01_09_v1', 'PvP01_10_v1', 'PvP01_11_v1', 'PvP01_12_v1',
+                'PvP01_13_v1', 'PvP01_14_v1', 'PvP01_API_v1', 'PvP01_MIT_v1')
+
+for(region in 1:3){
+  for(chrom in 1:16){
+    mhp_pi_by_gene_by_country$x$data[[chrom + (region - 1)*16]]$text = paste(mhp_pi_by_gene_by_country$x$data[[chrom + (region - 1)*16]]$text,
+      pi_by_gene_by_country[pi_by_gene_by_country$seqid == chromosomes[chrom],]$gene_description, sep = '<br />')
+  }
+}
+
+
+mhp_pi_by_gene_by_country
+
+```
+
+## Genetic differentiation
+
+```{r}
+
+pca_PerVen = fastGRM(obj = Pviv_rGenome_object, k = 2, monoclonals = monoclonals, polyclonals = polyclonals, Pop = 'Country')
+
+pca_PerVen  %>% ggplot(aes(x = PC1, y = PC2, color = Country))+
+  geom_point(alpha = .7, size = 2) +
+  stat_ellipse(level = .6)+
+  scale_color_manual(values = c('dodgerblue3', 'firebrick3'))+
+  theme_bw()+
+  labs(title = 'WGS - PerVen',
+       color = 'Regions')+
+  theme(legend.position = c(.8, .8))
+
+```
+
+Genetic Differentiation within Peru
+```{r}
+Pviv_rGenome_object_Peru = filter_samples(Pviv_rGenome_object, v = 
+                                          Pviv_rGenome_object@data$metadata$Country == 'Perú')
+
+monoclonals_per = Pviv_rGenome_object_Peru@data$metadata[Pviv_rGenome_object_Peru@data$metadata$Clonality == "Highly related Polyclonal",][['Sample_id']]
+
+polyclonals_per = Pviv_rGenome_object_Peru@data$metadata[Pviv_rGenome_object_Peru@data$metadata$Clonality == "Polyclonal",][['Sample_id']]
+
+pca_Per = fastGRM(obj = Pviv_rGenome_object_Peru, k = 2, monoclonals = monoclonals_per, polyclonals = polyclonals_per, Pop = 'Subnational_level0')
+
+
+pca_Per  %>% ggplot(aes(x = PC1, y = PC2, color = Subnational_level0))+
+  geom_point(alpha = .7, size = 2) +
+  stat_ellipse(level = .6)+
+  theme_bw()+
+  labs(title = 'WGS - Per',
+       color = 'Regions')
+
+```
+
+Genetic Differentiation within Peru
+```{r}
+Pviv_rGenome_object_Ven = filter_samples(Pviv_rGenome_object, v = 
+                                          Pviv_rGenome_object@data$metadata$Country == 'Venezuela')
+
+monoclonals_ven = Pviv_rGenome_object_Ven@data$metadata[Pviv_rGenome_object_Ven@data$metadata$Clonality == "Highly related Polyclonal",][['Sample_id']]
+
+polyclonals_ven = Pviv_rGenome_object_Ven@data$metadata[Pviv_rGenome_object_Ven@data$metadata$Clonality == "Polyclonal",][['Sample_id']]
+
+pca_Ven = fastGRM(obj = Pviv_rGenome_object_Ven, k = 2, monoclonals = monoclonals_ven, polyclonals = polyclonals_ven, Pop = 'Subnational_level2')
+
+
+pca_Ven  %>% ggplot(aes(x = PC1, y = PC2, color = Subnational_level2))+
+  geom_point(alpha = .7, size = 2) +
+  stat_ellipse(level = .6)+
+  theme_bw()+
+  labs(title = 'WGS - Ven',
+       color = 'Regions')
+
+```

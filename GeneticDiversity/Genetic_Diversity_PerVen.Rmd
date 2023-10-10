@@ -32,11 +32,11 @@ sourceCpp('../functions_libraries/Rcpp_functions.cpp')
 
 Create two objects containing the list of samples that are monoclonals and polyclonals
 ```{r}
-monoclonals = Pviv_rGenome_object@data$metadata %>% 
-  filter(Clonality %in% c('Highly related Polyclonal')) %>%
+monoclonals = Pviv_rGenome_filtered@metadata %>% 
+  filter(Clonality %in% c('Monoclonal','Highly related Polyclonal')) %>%
   select(Sample_id) %>% unlist()
 
-polyclonals = Pviv_rGenome_object@data$metadata %>% 
+polyclonals = Pviv_rGenome_filtered@metadata %>% 
   filter(Clonality %in% c('Polyclonal')) %>%
   select(Sample_id) %>% unlist()
 ```
@@ -44,24 +44,24 @@ polyclonals = Pviv_rGenome_object@data$metadata %>%
 Create a new rGenome object that only has the information of monoclonals samples
 ```{r}
 Pviv_rGenome_object_mono = filter_samples(
-      Pviv_rGenome_object , 
-      v = Pviv_rGenome_object@data$metadata$Sample_id %in% monoclonals)
+      Pviv_rGenome_filtered , 
+      v = Pviv_rGenome_filtered@metadata$Sample_id %in% monoclonals)
 ```
 Calculate the expected heterozygosity assuming that all samples are diploids
 ```{r}
-Pviv_rGenome_object@data$loci_table$ExpHet_all_as_diploid = 
-  get_ExpHet(obj = Pviv_rGenome_object, update_AC = T, monoclonals = NULL, polyclonals = c(monoclonals, polyclonals))
+Pviv_rGenome_filtered@loci_table$ExpHet_all_as_diploid = 
+  get_ExpHet(obj = Pviv_rGenome_filtered, update_AC = T, monoclonals = NULL, polyclonals = c(monoclonals, polyclonals))
 ```
 
 Calculate the expected heterozygosity considering that all samples are monoclonals, it means that secondary alleles won't be included
 ```{r}
-Pviv_rGenome_object@data$loci_table$ExpHet_all_as_haploid = 
-  get_ExpHet(obj = Pviv_rGenome_object, update_AC = T, monoclonals = c(monoclonals, polyclonals))
+Pviv_rGenome_filtered@loci_table$ExpHet_all_as_haploid = 
+  get_ExpHet(obj = Pviv_rGenome_filtered, update_AC = T, monoclonals = c(monoclonals, polyclonals), polyclonals = NULL)
 ```
 
 Calculate the expected heterozygosity considering only monoclonal samples
 ```{r}
-Pviv_rGenome_object@data$loci_table$ExpHet_only_monoclonals = 
+Pviv_rGenome_filtered@loci_table$ExpHet_only_monoclonals = 
   get_ExpHet(
     Pviv_rGenome_object_mono, 
     update_AC = T, 
@@ -70,18 +70,18 @@ Pviv_rGenome_object@data$loci_table$ExpHet_only_monoclonals =
 
 Calculate the expected heterozygosity defining the ploidy of each position individually
 ```{r}
-Pviv_rGenome_object@data$loci_table$ExpHet_default = get_ExpHet(obj = Pviv_rGenome_object)
+Pviv_rGenome_filtered@loci_table$ExpHet_default = get_ExpHet(obj = Pviv_rGenome_filtered)
 ```
 
 Calculate the expected heterozygosity defining the ploidy of each samples based on our previous classification. It means that in monoclonal samples secondary alleles will be removed, while in polyclonal samples all observed alleles will be included
 ```{r}
-Pviv_rGenome_object@data$loci_table$ExpHet_default2 = 
-  get_ExpHet(obj = Pviv_rGenome_object, update_AC = T, monoclonals = monoclonals, polyclonals = polyclonals)
+Pviv_rGenome_filtered@loci_table$ExpHet_default2 = 
+  get_ExpHet(obj = Pviv_rGenome_filtered, update_AC = T, monoclonals = monoclonals, polyclonals = polyclonals)
 ```
 
 Create a plot of ExpHet using the different approaches
-```{r}
-Pviv_rGenome_object@data$loci_table %>%
+```{r, fig.height=4, fig.width=6, fig.cap= 'Figure 1: Expected heterozygosity. Panel 1 (All samples as haploid) includes monoclonal and polyclonal infections and assumes that only one clone is present in each sample (only the primary allele is taken in polyclonal infections). Panle 2 (Default) discriminate monoclonal and polyclonal infections individualy for each polymorphic site, thus the sample size (number of alleles in the population) for each site is diferent. In Panel 3 (Default 2), for monoclonal samples only the primary allele is considered and all secondary alleles are masked, while polyclonal samples are handeled as diploids. In the fourth panel only the primary alleles of monoclonal infections are used. The Expected Heterozygosity considering that al samples are polyclonals (all samples are diploid as in vcftools) was used as control. Monoclonals and highly related polyclonal samples were cosidered as as monoclonal infections.'}
+Pviv_rGenome_filtered@loci_table %>%
   pivot_longer(cols = c('ExpHet_all_as_haploid', 'ExpHet_only_monoclonals', 'ExpHet_default', 'ExpHet_default2'), names_to = 'Treatment', values_to = 'ExpHet')%>%
   ggplot(aes(x = ExpHet_all_as_diploid, y = ExpHet))+
   geom_point(alpha = .1)+
@@ -90,9 +90,8 @@ Pviv_rGenome_object@data$loci_table %>%
 
 ```
 Create a plot of the distribution of ExpHet by by type of marker
-```{r}
-
-Pviv_rGenome_object@data$loci_table %>%
+```{r, fig.height=9, fig.width=8, fig.cap= 'Figure 2: Distribution of expected heterozygosity by type of polymorphims.'}
+Pviv_rGenome_filtered@loci_table %>%
   pivot_longer(cols = c('ExpHet_all_as_diploid','ExpHet_all_as_haploid', 'ExpHet_only_monoclonals', 'ExpHet_default', 'ExpHet_default2'), names_to = 'Treatment', values_to = 'ExpHet')%>%
   ggplot(aes(fill = Treatment, x = ExpHet))+
   geom_histogram(alpha = .4)+
@@ -103,15 +102,11 @@ Pviv_rGenome_object@data$loci_table %>%
 
 Calculate Heterozygosity by each population (Subnational_level0: Regions within Colombia)
 ```{r}
-
 ExpHet_by_Pop= 
-  get_ExpHet(obj = Pviv_rGenome_object, update_AC = T, monoclonals = NULL, polyclonals = NULL, by = 'Country')
-
-
+  get_ExpHet(obj = Pviv_rGenome_filtered, update_AC = T, monoclonals = monoclonals, polyclonals = polyclonals, by = 'Country')
 ```
 
-```{r}
-
+```{r, fig.height=9, fig.width=8, fig.cap= 'Figure 3: Distribution of Expected Heterozygosity by type of polymorphism and country. Expected Heterozygosity was calculated using only the primary allele of monoclonal infections and handeling polyclonal infections as diploids.'}
 ExpHet_by_Pop %>%
   pivot_longer(cols = c('Perú', 'Venezuela'), names_to = 'Region', values_to = 'ExpHet')%>%
   ggplot(aes(fill = Region, x = ExpHet))+
@@ -125,12 +120,11 @@ ExpHet_by_Pop %>%
 
 Calculate Nuc. Div. by gene by Population (Subnational_level0)
 ```{r}
-pi_by_gene_by_country = get_nuc_div(Pviv_rGenome_object, monoclonals = monoclonals, polyclonals = polyclonals, gff = '../reference/genes.gff', type_of_region = 'gene', window = NULL, by = 'Country')
+pi_by_gene_by_country = get_nuc_div(Pviv_rGenome_filtered, monoclonals = monoclonals, polyclonals = polyclonals, gff = '../reference/genes.gff', type_of_region = 'gene', window = NULL, by = 'Country')
 ```
 
 
 ```{r}
-
 mhp_pi_by_gene_by_country = pi_by_gene_by_country %>%
   pivot_longer(cols = c('Perú_pi', 'Venezuela_pi', 'Total_pi'), names_to = 'Regions', values_to = 'pi')%>%
   mutate(CHROM2  = gsub('(^(\\d|P|v)+_|_v1)', '',seqid))%>%
@@ -144,10 +138,9 @@ mhp_pi_by_gene_by_country = pi_by_gene_by_country %>%
           axis.text.x = element_blank(),
           axis.title.x = element_blank())
 
-mhp_pi_by_gene_by_country
 ```
 
-```{r}
+```{r, fig.height=7.5, fig.width=10, fig.cap= 'Figure 4: Nucleotide diversity by gene and Country. The claculus was done using only the primary allele of monoclonal infections and handeling polyclonal infections as diploids.'}
 
 mhp_pi_by_gene_by_country = ggplotly(mhp_pi_by_gene_by_country)
 
@@ -170,9 +163,9 @@ mhp_pi_by_gene_by_country
 
 ## Genetic differentiation
 
-```{r}
+```{r, fig.height=4, fig.width=6, fig.cap= 'Figure 5: Principal component analysis. Colors are assigned by country.'}
 
-pca_PerVen = fastGRM(obj = Pviv_rGenome_object, k = 2, monoclonals = monoclonals, polyclonals = polyclonals, Pop = 'Country')
+pca_PerVen = fastGRM(obj = Pviv_rGenome_filtered, k = 2, monoclonals = monoclonals, polyclonals = polyclonals, Pop = 'Country')
 
 pca_PerVen  %>% ggplot(aes(x = PC1, y = PC2, color = Country))+
   geom_point(alpha = .7, size = 2) +
@@ -180,26 +173,24 @@ pca_PerVen  %>% ggplot(aes(x = PC1, y = PC2, color = Country))+
   scale_color_manual(values = c('dodgerblue3', 'firebrick3'))+
   theme_bw()+
   labs(title = 'WGS - PerVen',
-       color = 'Regions')+
-  theme(legend.position = c(.8, .8))
+       color = 'Regions')
 
 ```
 
 Genetic Differentiation within Peru
-```{r}
-Pviv_rGenome_object_Peru = filter_samples(Pviv_rGenome_object, v = 
-                                          Pviv_rGenome_object@data$metadata$Country == 'Perú')
+```{r, fig.height=4, fig.width=6, fig.cap= 'Figure 6: Principal component analysis of peruvian samples. Colors are assigned by locality.'}
+Pviv_rGenome_object_Peru = filter_samples(Pviv_rGenome_filtered, v = 
+                                          Pviv_rGenome_filtered@metadata$Country == 'Perú')
 
-monoclonals_per = Pviv_rGenome_object_Peru@data$metadata[Pviv_rGenome_object_Peru@data$metadata$Clonality == "Highly related Polyclonal",][['Sample_id']]
+monoclonals_per = Pviv_rGenome_object_Peru@metadata[Pviv_rGenome_object_Peru@metadata$Clonality %in% c('Monoclonbal',"Highly related Polyclonal"),][['Sample_id']]
 
-polyclonals_per = Pviv_rGenome_object_Peru@data$metadata[Pviv_rGenome_object_Peru@data$metadata$Clonality == "Polyclonal",][['Sample_id']]
+polyclonals_per = Pviv_rGenome_object_Peru@metadata[Pviv_rGenome_object_Peru@metadata$Clonality == "Polyclonal",][['Sample_id']]
 
 pca_Per = fastGRM(obj = Pviv_rGenome_object_Peru, k = 2, monoclonals = monoclonals_per, polyclonals = polyclonals_per, Pop = 'Subnational_level0')
 
 
 pca_Per  %>% ggplot(aes(x = PC1, y = PC2, color = Subnational_level0))+
   geom_point(alpha = .7, size = 2) +
-  stat_ellipse(level = .6)+
   theme_bw()+
   labs(title = 'WGS - Per',
        color = 'Regions')
@@ -207,16 +198,15 @@ pca_Per  %>% ggplot(aes(x = PC1, y = PC2, color = Subnational_level0))+
 ```
 
 Genetic Differentiation within Peru
-```{r}
-Pviv_rGenome_object_Ven = filter_samples(Pviv_rGenome_object, v = 
-                                          Pviv_rGenome_object@data$metadata$Country == 'Venezuela')
+```{r, fig.height=4, fig.width=6, fig.cap= 'Figure 7: Principal component analysis of samples from Venezuela. Colors are assigned by Subnational level 2 Municipality).'}
+Pviv_rGenome_object_Ven = filter_samples(Pviv_rGenome_filtered, v = 
+                                          Pviv_rGenome_filtered@metadata$Country == 'Venezuela')
 
-monoclonals_ven = Pviv_rGenome_object_Ven@data$metadata[Pviv_rGenome_object_Ven@data$metadata$Clonality == "Highly related Polyclonal",][['Sample_id']]
+monoclonals_ven = Pviv_rGenome_object_Ven@metadata[Pviv_rGenome_object_Ven@metadata$Clonality %in% c('Monoclonbal',"Highly related Polyclonal"),][['Sample_id']]
 
-polyclonals_ven = Pviv_rGenome_object_Ven@data$metadata[Pviv_rGenome_object_Ven@data$metadata$Clonality == "Polyclonal",][['Sample_id']]
+polyclonals_ven = Pviv_rGenome_object_Ven@metadata[Pviv_rGenome_object_Ven@metadata$Clonality == "Polyclonal",][['Sample_id']]
 
 pca_Ven = fastGRM(obj = Pviv_rGenome_object_Ven, k = 2, monoclonals = monoclonals_ven, polyclonals = polyclonals_ven, Pop = 'Subnational_level2')
-
 
 pca_Ven  %>% ggplot(aes(x = PC1, y = PC2, color = Subnational_level2))+
   geom_point(alpha = .7, size = 2) +
@@ -224,5 +214,50 @@ pca_Ven  %>% ggplot(aes(x = PC1, y = PC2, color = Subnational_level2))+
   theme_bw()+
   labs(title = 'WGS - Ven',
        color = 'Regions')
+
+```
+## Drug Resistance Surveillance
+
+```{r, fig.height=16, fig.width=8, fig.cap= 'Figure 8: Haplotype frquency of genes MDR1 and MRP1 by country'}
+
+drug_haplotypes = get_haplotypes_respect_to_reference(obj = Pviv_rGenome_filtered,
+                                    gene_ids = c('PVP01_1010900','PVP01_0203000'),
+                                    gene_labels = c('pvmdr1','pvmrp1'),
+                                    gff_file = "../reference/genes.gff",
+                                    fasta_file = "../reference/PvP01.v1.fasta",
+                                    monoclonals = monoclonals,
+                                    polyclonals = polyclonals,
+                                    variables = c('Country', 'Year_of_Collection'))
+drug_haplotypes$haplo_freq_plot+
+  #theme_bw()+
+  theme(axis.text = element_text(size = 5),
+        legend.text = element_text(size = 5))+
+  guides(fill=guide_legend(ncol=1))
+
+```
+```{r, eval = FALSE, include = FALSE}
+gene_ids = c('PVP01_0835600', 'PVP01_1208000', 'PVP01_0623800',
+             'PVP01_0102300', 'PVP01_0701200', 'PVP01_0701100',
+             'PVP01_1402400', 'PVP01_0800700', 'PVP01_0534300')
+gene_name = c('pvcsp', 'pvp47', 'pvdbp',
+              'pvdbp2', 'pvrbp1a', 'pvrbp1b',
+              'pvrbp2a', 'pvrbp2b', 'pvrbp2c')
+gff_file = "../reference/genes.gff"
+fasta_file = "../reference/PvP01.v1.fasta"
+
+gene_ids = c('PVP01_0109300','PVP01_1010900','PVP01_0203000','PVP01_0312700',
+             'PVP01_0526600','PVP01_1429500','PVP01_1018600','PVP01_1103800',
+             'PVP01_1211100','PVP01_1259100','PVP01_1447300')
+gene_names = c('pvcrt','pvmdr1','pvmrp1','pvdmt2',
+               'pvdhfr','pvdhps','pvpi3k','pvabc-e1',
+               'pvk13','pvmdr2','pvmrp2')
+
+gene_ids = c('PF3D7_0417200',
+             'PF3D7_0523000',
+             'PF3D7_0810800',
+             'PF3D7_1343700',
+             'PF3D7_1447900')
+gff_file = "../reference/PlasmoDB-59_Pfalciparum3D7.gff"
+fasta_file = "../reference/PlasmoDB-59_Pfalciparum3D7_Genome.fasta"
 
 ```

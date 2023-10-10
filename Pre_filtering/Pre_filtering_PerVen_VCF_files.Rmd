@@ -11,7 +11,7 @@ output:
 editor_options: 
   markdown: 
     wrap: 72
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -26,23 +26,23 @@ After the variant call process the **VCF** file generated contains some artefact
 
 ## Section 1: Filtering of VCF files
 
-### Setp 1: Filter of non core regions, coding regions, and samples of interest.
+### Setp 1: Filter of coding regions.
 
-For this step, the `.vcf` file is still too large to be manipulated in our personal computer, for that reason this step had been *P. vivax* has several genomic regions like the vir genes that are hard to align because they
+In this step the `.vcf` file is still too large to be manipulated in our personal computer, for that reason this step will be run in the server.
 
 For this first step we require the following files:
 
--   `.vcf.gz` or `.vcf` files: If a `.vcf.gz` is used, a `.vcf.tbi` will be also required. For this tutorial the `.vfc.gz` file that we are going to work with is: `ColombiaGates_Pviv.JointCall.filtered.combined.snpeff.vcf.gz`.
+-   `.vcf.gz` or `.vcf` files: If a `.vcf.gz` is used, a `.vcf.tbi` will be also required. For this tutorial the `.vfc.gz` file that we are going to work with is: `VENPER2019_2022Partial.JointCall.filtered.combined.snpeff.vcf`.
 
 -   `.gff`: the gff file of the reference genome will be also required in order to filter coding regions.
 
--   `noncore_regions.bed`: This file will be used to remove non-core regions that are difficult to sequence from the analysis.
+-   `noncore_regions.bed`: This file will be used to remove non-core regions that are difficult to sequence from the analysis. This file won't be included as it remove genes of interest located in subtelomeric regions such as duffy binding protein 2.
 
 -   `load_libraries.R`: This R script file load all the required packages that we need to perform the analysis.
 
--   `functions.R`: This R script file load all the functions that we have created to perform the analysis. Within those functions we a function named `fx_run_vcftools` that allow us to manipulate the `vcftools` package from the R environment. We have also created other functions to get information from the `.vcf` file with loading the whole file in R environment. This functions will help us the get information regarding to the name of the samples and create a `samples.indv` to use as a filter in the analysis. Other functions will be explained later in this tutorial.
+-   `functions.R`: This R script file load all the functions that we have created to perform the analysis. Within those functions we a function named `run_vcftools` that allow us to manipulate the `vcftools` package from the R environment. We have also created other functions to get information from the `.vcf` file by loading the whole file in R environment.
 
--   `Filtering_vcf_file.R`: This R script file contains the instructions to perform the analysis in R. This script requires 9 arguments:
+-   `Coding_regions_filter.R`: This R script file contains the instructions to filter the coding regions in R. This script requires 9 arguments:
 
     -   `wd`: Working directory where all temporal files and final outputs will be stored.
 
@@ -58,48 +58,80 @@ For this first step we require the following files:
 
     -   `gff`: name of the `.gff` file. This file should be stored in the `fd` path.
 
+- `Split_chromosomes.R`: Scrip with instruction to split the large vcf file by chromosomes, and convert each of the vcf files to the rGenome fromat (a format that is easier to manipulate in r for further analysis). In addition to the previous arguments, this script contains two more arguments to speed up the analysis in the server, and to define the minimum read depth to call an allele.
+
     -   `n`: number of iterations. In the final step of this script we are going to transform our data from VCF format to rGenome format. This step is computing exhausting and consumes RAM memory. For that reason we subdivide this step in `n` instances to be able to run in the server.
 
     -   `thres`: Minimum read depth to call an allele in a sample.
 
--   `r_options.sh`: bash script with the instructions to run R. This file should be stored in `wd`. The scrip should looks as follow:
-```{bash}
-##!/bin/bash
-# source /broad/software/scripts/useuse
-# use R-4.1
-# Rscript /gsap/garage-protistvector/ColombiaData/Pviv/AnalysisTools/Filtering_vcf_file.R \
-#   -wd /gsap/garage-protistvector/ColombiaData/Pviv/DataGeneration/post_vcall_analysis/ \
-#   -fd /gsap/garage-protistvector/ColombiaData/Pviv/AnalysisTools \
-#   -gzvcf /gsap/garage-protistvector/ColombiaData/Pviv/DataGeneration/ColombiaGates_Pviv.JointCall.filtered.combined.snpeff.vcf.gz \
-#   -o ColombiaGates \
-#   -rkeep (Col|SP) \
-#   -ebed Pvivax_P01_noncore.bed \
-#   -gff genes.gff \
-#   -n 500 \
-#   -thres 5
+-   `r_options_CR_filter_Pviv.sh`: bash script with the instructions to run `Coding_regions_filter.R`. This file should be stored in `wd`. The scrip should looks as follow:
+```{bash, eval = FALSE}
+#!/bin/bash
+source /broad/software/scripts/useuse
+use R-4.1
+Rscript /gsap/garage-protistvector/PanSAmer/Coding_regions_filter.R \
+  -wd /gsap/garage-protistvector/PanSAmer/PerVenPviv2023 \
+  -fd /gsap/garage-protistvector/ColombiaData/Pviv/AnalysisTools \
+  -gzvcf /seq/plasmodium/PanSAmer/JointCall/VENPER2019_2022.JointCall.filtered.combined.snpeff.vcf \
+  -o PerVen_Pviv_2023 \
+  -gff genes.gff \
+  -n 500 \r_o   pv    
+  -thres 1
 ```
 
-- `uger_options.sh`: bash script with the instruction to run UGER. This file should be stored in `wd`. The scrip should looks as follow:
-```{bash}
-##!/bin/bash
-#qsub -l h_vmem=32G \
-#   -l h_rt=01:00:00 \
-#   -o /gsap/garage-protistvector/ColombiaData/Pviv/DataGeneration/post_vcall_analysis/output/ \
-#   /gsap/garage-protistvector/ColombiaData/Pviv/DataGeneration/post_vcall_analysis/r_options.sh
+- `uger_options_pviv.sh`: bash script with the instruction to run UGER and the bash script `r_options_CR_filter_Pviv.sh`. This file should be stored in `wd`. The scrip should looks as follow:
+```{bash, eval = FALSE}
+#!/bin/bash
+qsub -l h_vmem=32G \
+   -l h_rt=10:00:00 \
+   -o /gsap/garage-protistvector/PanSAmer/output \
+   /gsap/garage-protistvector/PanSAmer/r_options_CR_filter_Pviv.sh
 ```
 
+- `r_options_chr_filter_Pviv.sh`: : bash script with the instructions to run `Split_chromosomes.R`. This file should be stored in `wd`. The scrip should looks as follow:
+```{bash, eval = FALSE}
+#!/bin/bash
+source /broad/software/scripts/useuse
+use R-4.1
+Rscript /gsap/garage-protistvector/PanSAmer/Split_chromosomes.R \
+  -wd /gsap/garage-protistvector/PanSAmer/PerVenPviv2023 \
+  -fd /gsap/garage-protistvector/ColombiaData/Pviv/AnalysisTools \
+  -vcf /gsap/garage-protistvector/PanSAmer/PerVenPviv2023/PerVen_Pviv_2023_CodingRegionsOnly.recode.vcf \
+  -chr $SGE_TASK_ID \
+  -o PerVen_Pviv_2023_thres1_CodingRegionsOnly \
+  -n 500 \
+  -thres 1 \
+  -p Pv
+```
+
+- `uger_options_chr_pviv.sh`: bash script with the instruction to run UGER and the bash script `r_options_chr_filter_Pviv.sh`. This file should be stored in `wd`. The scrip should looks as follow:
+```{bash, eval = FALSE}
+#!/bin/bash
+qsub -l h_vmem=32G \
+   -l h_rt=10:00:00 \
+   -o /gsap/garage-protistvector/PanSAmer/output2/ \
+   -t 1-16 \
+   /gsap/garage-protistvector/PanSAmer/r_options_chr_filter_Pviv.sh
+```
 As a final output this step will generate and `.RData` file containing the data in `rGenome` format.
 
-### Step 2: Filter of potential PCR genotyping artifacts (Missing data, Homopolymers & Short Tandem Repeats)
+### Step 2: Low support (Read depth) and missing data
 
-1. Load the rGenome Object and required libraries and functions:
+1.1 Load the required libraries and functions:
 
-```{r 'Loading the rGenome Object and required libraries and function'}
+```{r 'Loading required libraries and functions'}
 setwd('~/Documents/Github/Plasmodium_WGS_analysis/Pre_filtering/')
 
-source('../functions_libraries/load_libraries.R')
+load('backup.RData')
 
-for(file in list.files('PerVen/Pviv/', pattern = '.RData')){
+source('../functions_libraries/load_libraries.R')
+source('../functions_libraries/functions.R')
+#sourceCpp('../functions_libraries/Rcpp_functions.cpp')
+```
+
+1.2 Load the rGenome objects:
+```{r 'Load the rGenome objects', eval = FALSE}
+for(file in list.files('PerVen/Pviv/', pattern = '.+thres1.+.RData')){
   load(file.path('PerVen/Pviv/', file))
   rm(list = ls()[!grepl('PvP01_(\\d+|MIT|API)_v1_rGenome_object', ls())])
 }
@@ -116,10 +148,11 @@ rGenome_objects = list(PvP01_01_v1_rGenome_object,
      PvP01_10_v1_rGenome_object,
      PvP01_11_v1_rGenome_object,
      PvP01_12_v1_rGenome_object,
-     PvP01_13_v1_rGenome_object,
-     PvP01_14_v1_rGenome_object,
-     PvP01_MIT_v1_rGenome_object,
-     PvP01_API_v1_rGenome_object)
+     PvP01_13_v1_rGenome_object#,
+     #'PvP01_14_v1_rGenome_object,
+     #'PvP01_MIT_v1_rGenome_object,
+     #'PvP01_API_v1_rGenome_object
+     )
 
 rm(list = c('PvP01_01_v1_rGenome_object',
      'PvP01_02_v1_rGenome_object',
@@ -133,40 +166,53 @@ rm(list = c('PvP01_01_v1_rGenome_object',
      'PvP01_10_v1_rGenome_object',
      'PvP01_11_v1_rGenome_object',
      'PvP01_12_v1_rGenome_object',
-     'PvP01_13_v1_rGenome_object',
-     'PvP01_14_v1_rGenome_object',
-     'PvP01_MIT_v1_rGenome_object',
-     'PvP01_API_v1_rGenome_object'))
+     'PvP01_13_v1_rGenome_object'#,
+     #'PvP01_14_v1_rGenome_object',
+     #'PvP01_MIT_v1_rGenome_object',
+     #'PvP01_API_v1_rGenome_object'
+     ))
 
 source('../functions_libraries/functions.R')
-#sourceCpp('../functions_libraries/Rcpp_functions.cpp')
+Pviv_rGenome_object = rGenome(gt = NULL,
+                              loci_table = NULL,
+                              metadata = NULL)
 
-Pviv_rGenome_object = rGenome()
+metadata = rGenome_objects[[1]]@metadata
 
 for(obj in 1:length(rGenome_objects)){
-  Pviv_rGenome_object@data$gt = rbind(Pviv_rGenome_object@data$gt, rGenome_objects[[obj]]@data$gt)
-  Pviv_rGenome_object@data$loci_table = rbind(Pviv_rGenome_object@data$loci_table, rGenome_objects[[obj]]@data$loci_table)
+  Pviv_rGenome_object@gt = rbind(Pviv_rGenome_object@gt, rGenome_objects[[obj]]@gt)
+  Pviv_rGenome_object@loci_table = rbind(Pviv_rGenome_object@loci_table, rGenome_objects[[obj]]@loci_table)
+  rGenome_objects[[obj]] = NULL
+  
 }
 
-Pviv_rGenome_object@data$metadata = rbind(Pviv_rGenome_object@data$metadata, rGenome_objects[[obj]]@data$metadata)
+Pviv_rGenome_object@metadata = rbind(Pviv_rGenome_object@metadata, rGenome_objects[[obj]]@metadata)
 
 rm(list = c('rGenome_objects', 'obj'))
 
+# save.image('Prefiltered_Pviv_1st.RData')
+# load('Prefiltered_Pviv_1st.RData')
 ```
 
 2. Add Metadata.
 
-```{r 'Codigo de R'}
+```{r 'Codigo de R', eval = FALSE}
 
 # There are some spelling mistakes in the sample codes of the sequencing files, The table VENPER2019_2022.csv match the incorrect codes with the correct codes
 external_metadata = read.csv('../GeneticDiversity/merged_metadata.csv')
 PerVen_seq_codes = read.csv('PerVen/VENPER2019_2022.csv')
 
 # Remove Duplicated records
+
+View(PerVen_seq_codes[PerVen_seq_codes$PreferedSampleID %in% PerVen_seq_codes$PreferedSampleID[duplicated(PerVen_seq_codes$PreferedSampleID)],])
+
+
+
 external_metadata = external_metadata[!duplicated(external_metadata$Sample_id),]
+
 PerVen_seq_codes = PerVen_seq_codes[!duplicated(PerVen_seq_codes$PreferedSampleID),]
 
-# merge incorrect and correcte codes with metadata
+# merge incorrect and correct codes with metadata
 external_metadata = merge(external_metadata, PerVen_seq_codes, by.x = 'Sample_id', by.y = 'AlternateSampleID', all.x = T)
 
 external_metadata %<>% mutate(PreferedSampleID = case_when(
@@ -175,31 +221,435 @@ external_metadata %<>% mutate(PreferedSampleID = case_when(
 ))
 
 # Add metadata to the rGenome object
-Pviv_rGenome_object@data$metadata = merge(Pviv_rGenome_object@data$metadata, external_metadata[,c("PreferedSampleID", "Sample_id", "Study", "Country", 'Date_of_Collection', "Year_of_Collection",'Subnational_level0', 'Subnational_level1', "Subnational_level2")], by.x = 'Sample_id', by.y = 'PreferedSampleID', all.x = T)
+Pviv_rGenome_object@metadata = merge(Pviv_rGenome_object@metadata, external_metadata[,c("PreferedSampleID", "Sample_id", "Study", "Country", 'Date_of_Collection', "Year_of_Collection",'Subnational_level0', 'Subnational_level1', "Subnational_level2")], by.x = 'Sample_id', by.y = 'PreferedSampleID', all.x = T)
 
 # Sorting samples
-rownames(Pviv_rGenome_object@data$metadata) =
-  Pviv_rGenome_object@data$metadata$Sample_id
+rownames(Pviv_rGenome_object@metadata) = Pviv_rGenome_object@metadata$Sample_id
 
-Pviv_rGenome_object@data$metadata =
-  Pviv_rGenome_object@data$metadata[colnames(Pviv_rGenome_object@data$gt),]
+Pviv_rGenome_object@metadata = Pviv_rGenome_object@metadata[colnames(Pviv_rGenome_object@gt),]
+
+Pviv_rGenome_object@metadata[is.na(Pviv_rGenome_object@metadata$Country),][['Country']] = 'Venezuela'
 
 ```
 
-#### Step 2.1: Missing data
+#### Setp 2.1: Site coverage (Read depth by site)
 
-3. Remove samples with low amplification rate.
+3. Calculate the total (sum over all alleles and all samples) and mean (arithmetic mean of the total read depth of the samples) read depth by site using the function `Summarise_ReadDepth()`.
+```{r, eval = FALSE}
+# Calculate the total and mean read depth per each site per each country using the function Summarise_ReadDepth.
 
-3.1 Sample amplification rate
+Read_Depth_Summ = NULL
 
-```{r}
-Pviv_rGenome_object = SampleAmplRate(Pviv_rGenome_object)
+for(w in 1:100){
+  start = Sys.time()
+  Read_Depth_Summ = rbind(Read_Depth_Summ, Summarise_ReadDepth(obj = Pviv_rGenome_object, by = 'Country', w = w, n = 100))
+  end = Sys.time()
+  print(paste0('Iteration ',w , ' took ', end - start, ' secs'))
+}
+
+# Transform the Read_Depth_Summ table from wide to long format
+
+## Extract data from Peru
+Read_Depth_Summ_Peru = data.frame(Chrom = 
+                                  gsub('_\\d+$','',
+                                       rownames(Read_Depth_Summ)),
+                                  Pos = gsub('^.+_','',
+                                             rownames(Read_Depth_Summ)),
+                                  Country = 'Peru',
+                                  Read_Depth_Summ[grepl('_Per',
+                                                   colnames(Read_Depth_Summ))])
+
+colnames(Read_Depth_Summ_Peru) = gsub('_Per.$','',
+                                      colnames(Read_Depth_Summ_Peru))
+## Extract data Venezuela
+Read_Depth_Summ_Venezuela = data.frame(Chrom = 
+                                         gsub('_\\d+$','',
+                                                    rownames(Read_Depth_Summ)),
+                                         Pos = gsub('^.+_','',
+                                                    rownames(Read_Depth_Summ)),
+                                         Country = 'Venezuela',
+                                         Read_Depth_Summ[grepl('_Ven',
+                                                   colnames(Read_Depth_Summ))])
+
+colnames(Read_Depth_Summ_Venezuela) = gsub('_Ven.+$','',
+                                           colnames(Read_Depth_Summ_Venezuela))
+
+## Extract data from the total Population
+Read_Depth_Summ_Total = data.frame(Chrom = gsub('_\\d+$','',
+                                                rownames(Read_Depth_Summ)),
+                             Pos = gsub('^.+_','',
+                                        rownames(Read_Depth_Summ)),
+                             Country = 'Total',
+                             Read_Depth_Summ[grepl('_Total$',
+                                                   colnames(Read_Depth_Summ))])
+
+colnames(Read_Depth_Summ_Total) = gsub('_Total$','',
+                                       colnames(Read_Depth_Summ_Total))
+
+
+Read_Depth_Summ = rbind(Read_Depth_Summ_Peru,
+                        Read_Depth_Summ_Venezuela,
+                        Read_Depth_Summ_Total)
+
+rm(list = c('Read_Depth_Summ_Peru',
+            'Read_Depth_Summ_Venezuela',
+            'Read_Depth_Summ_Total'))
+
+Read_Depth_Summ$Pos = as.integer(Read_Depth_Summ$Pos)
+Read_Depth_Summ$Country = factor(Read_Depth_Summ$Country,
+                                 levels = c('Peru',
+                                            'Venezuela',
+                                            'Total'))
 ```
 
-3.2 Check the distribution of the amplification rate of the samples using a histogram
+4. Plot the total read depth by site, by country, and by chromosome.
+```{r, fig.height = 16, fig.width = 8, fig.cap= '**Figure 1:** Total read depth by site.'}
+Read_Depth_Summ %>% ggplot(aes(x = Pos, y = Total_ReadDepth, color = Country, group = Country)) +
+  geom_line() +
+  facet_grid(Chrom~Country, scales = 'free_y') +
+  scale_color_manual(values = c('dodgerblue3', 'firebrick3', 'black')) +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+```
+
+5. Plot the mean read depth by site, by country, and by chromosome.
+```{r, fig.height = 16, fig.width = 8, fig.cap= '**Figure 2:** Mean read depth by site.'}
+Read_Depth_Summ %>% ggplot(aes(x = Pos, y = mean_ReadDepth, color = Country, group = Country)) +
+  geom_line() +
+  facet_grid(Chrom~Country, scales = 'free_y') +
+  scale_color_manual(values = c('dodgerblue3', 'firebrick3', 'black')) +
+  theme_bw() +
+  theme(axis.text.x = element_blank())
+```
+
+#### Step 2.2: Remove samples with low amplification rate.
+
+6. Calculate the proportion of amplified loci (amplification rate), with a coverage equals or greater than 1, 2, 3, 4 and 5, of the samples.
+
+```{r, eval = FALSE}
+# Sample amplification rate including all detected reads
+SampAmpRate_thres0 = SampleAmplRate(Pviv_rGenome_object, update = FALSE, threshold = NULL)
+SampAmpRate_thres0 = data.frame(Sample_id = names(SampAmpRate_thres0),
+                                AmpRate = SampAmpRate_thres0,
+                                Threshold = 1)
+SampAmpRate_thres0 = merge(SampAmpRate_thres0,
+                           Pviv_rGenome_object@metadata[,c('Sample_id', 'Country')],
+                           by = 'Sample_id',
+                           all.x = TRUE)
+
+# Sample amplification rate including only sites supported by at least 2 reads
+SampAmpRate_thres1 = SampleAmplRate(Pviv_rGenome_object, update = FALSE, threshold = 1, n = 100)
+SampAmpRate_thres1 = data.frame(Sample_id = names(SampAmpRate_thres1),
+                                AmpRate = SampAmpRate_thres1,
+                                Threshold = 2)
+SampAmpRate_thres1 = merge(SampAmpRate_thres1,
+                           Pviv_rGenome_object@metadata[,c('Sample_id', 'Country')],
+                           by = 'Sample_id',
+                           all.x = TRUE)
+
+# Sample amplification rate including only sites supported by at least 3 reads
+SampAmpRate_thres2 = SampleAmplRate(Pviv_rGenome_object, update = FALSE, threshold = 2, n = 100)
+SampAmpRate_thres2 = data.frame(Sample_id = names(SampAmpRate_thres2),
+                                AmpRate = SampAmpRate_thres2,
+                                Threshold = 3)
+SampAmpRate_thres2 = merge(SampAmpRate_thres2,
+                           Pviv_rGenome_object@metadata[,c('Sample_id', 'Country')],
+                           by = 'Sample_id',
+                           all.x = TRUE)
+
+# Sample amplification rate including only sites supported by at least 4 reads
+SampAmpRate_thres3 = SampleAmplRate(Pviv_rGenome_object, update = FALSE, threshold = 3, n = 100)
+SampAmpRate_thres3 = data.frame(Sample_id = names(SampAmpRate_thres3),
+                                AmpRate = SampAmpRate_thres3,
+                                Threshold = 4)
+SampAmpRate_thres3 = merge(SampAmpRate_thres3,
+                           Pviv_rGenome_object@metadata[,c('Sample_id', 'Country')],
+                           by = 'Sample_id',
+                           all.x = TRUE)
+
+# Sample amplification rate including only sites supported by at least 5 reads
+SampAmpRate_thres4 = SampleAmplRate(Pviv_rGenome_object, update = FALSE, threshold = 4, n = 100)
+SampAmpRate_thres4 = data.frame(Sample_id = names(SampAmpRate_thres4),
+                                AmpRate = SampAmpRate_thres4,
+                                Threshold = 5)
+SampAmpRate_thres4 = merge(SampAmpRate_thres4,
+                           Pviv_rGenome_object@metadata[,c('Sample_id', 'Country')],
+                           by = 'Sample_id',
+                           all.x = TRUE)
+
+# Combining all vectors of SampAmpRate
+SampAmpRate_summ = rbind(SampAmpRate_thres0,
+                    SampAmpRate_thres1,
+                    SampAmpRate_thres2,
+                    SampAmpRate_thres3,
+                    SampAmpRate_thres4)
+
+rm(list = c('SampAmpRate_thres0',
+            'SampAmpRate_thres1',
+            'SampAmpRate_thres2',
+            'SampAmpRate_thres3',
+            'SampAmpRate_thres4'))
+```
+
+7. Plot the proportion of samples that success to amplify with an specific amplification rate.
+```{r, fig.height=4, fig.width=8, fig.cap='Decay curve of the percentage of passed samples as a function of their amplification rate. Line color assigned by min read depth (coverage) to call an allele'}
+SampAmpRate_summ %>% group_by(Country, Threshold) %>%
+  summarise(AmpRate5 = round(100*sum(AmpRate >= .05)/n(), 1),
+            AmpRate10 = round(100*sum(AmpRate >= .10)/n(), 1),
+            AmpRate15 = round(100*sum(AmpRate >= .15)/n(), 1),
+            AmpRate20 = round(100*sum(AmpRate >= .20)/n(), 1),
+            AmpRate25 = round(100*sum(AmpRate >= .25)/n(), 1),
+            AmpRate30 = round(100*sum(AmpRate >= .30)/n(), 1),
+            AmpRate35 = round(100*sum(AmpRate >= .35)/n(), 1),
+            AmpRate40 = round(100*sum(AmpRate >= .40)/n(), 1),
+            AmpRate45 = round(100*sum(AmpRate >= .45)/n(), 1),
+            AmpRate50 = round(100*sum(AmpRate >= .50)/n(), 1),
+            AmpRate55 = round(100*sum(AmpRate >= .55)/n(), 1),
+            AmpRate60 = round(100*sum(AmpRate >= .60)/n(), 1),
+            AmpRate65 = round(100*sum(AmpRate >= .65)/n(), 1),
+            AmpRate70 = round(100*sum(AmpRate >= .70)/n(), 1),
+            AmpRate75 = round(100*sum(AmpRate >= .75)/n(), 1),
+            AmpRate80 = round(100*sum(AmpRate >= .80)/n(), 1),
+            AmpRate85 = round(100*sum(AmpRate >= .85)/n(), 1),
+            AmpRate90 = round(100*sum(AmpRate >= .90)/n(), 1),
+            AmpRate95 = round(100*sum(AmpRate >= .95)/n(), 1),
+            AmpRate100 = round(100*sum(AmpRate >= 1)/n(), 1)) %>%
+  pivot_longer(cols = paste0('AmpRate', seq(5, 100, 5)),
+               values_to = 'Percentage',
+               names_to = 'AmpRate') %>%
+  mutate(AmpRate = as.numeric(gsub('AmpRate','', AmpRate)))%>%
+  ggplot(aes(x = AmpRate, y = Percentage, color = as.factor(Threshold), group = as.factor(Threshold))) +
+  geom_line() +
+  geom_vline(xintercept = 75, linetype = 2) +
+  facet_grid(.~Country) +
+  theme_bw() +
+  labs(x = '% of amplified loci (amplification rate)', y = '% of Samples', color = 'Min Coverage')
+```
+8. Table of the number of samples and the proportion of samples that amplify more than 50% of their loci with a coverage equals or greater than 5
+```{r}
+SampAmpRate_summ %>% group_by(Country, Threshold) %>%
+  summarise(nSample_w_AmpRate50 = sum(AmpRate >= .5),
+            nSamples = n(),
+            prop_of_samples_w_AmpRate50 = round(100*sum(AmpRate >= .5)/n(), 1))
+```
+
+9. Calculate the proportion of amplified samples per each loci using a coverage of 1 and 5 to call an allele.
+```{r, eval = FALSE}
+# Create an rGenome object per  each country
+
+Peru_rGenome = filter_samples(obj = Pviv_rGenome_object,
+                             v = Pviv_rGenome_object@metadata$Country == 'Perú')
+
+
+Venezuela_rGenome = filter_samples(obj = Pviv_rGenome_object,
+                             v = Pviv_rGenome_object@metadata$Country == 'Venezuela')
+
+
+Peru_LocusAmpRate_thres0 = LocusAmplRate(Peru_rGenome, update = FALSE, threshold = NULL)
+
+Peru_LocusAmpRate_thres0 = 
+  data.frame(Locus_id = names(Peru_LocusAmpRate_thres0),
+             Chrom = gsub(
+               '_\\d+$',
+               '',
+               names(Peru_LocusAmpRate_thres0)),
+             Pos = as.integer(gsub(
+               '^.+_',
+               '',
+               names(Peru_LocusAmpRate_thres0))),
+             AmpRate = Peru_LocusAmpRate_thres0,
+             Threshold = 1)
+
+Venezuela_LocusAmpRate_thres0 = LocusAmplRate(Venezuela_rGenome, update = FALSE, threshold = NULL)
+
+Venezuela_LocusAmpRate_thres0 = 
+  data.frame(Locus_id = names(Venezuela_LocusAmpRate_thres0),
+             Chrom = gsub(
+               '_\\d+$',
+               '',
+               names(Venezuela_LocusAmpRate_thres0)),
+             Pos = as.integer(gsub(
+               '^.+_',
+               '',
+               names(Venezuela_LocusAmpRate_thres0))),
+             AmpRate = Venezuela_LocusAmpRate_thres0,
+             Threshold = 1)
+
+
+Peru_LocusAmpRate_thres4 = LocusAmplRate(Peru_rGenome, update = FALSE, threshold = 4, n =100)
+
+Peru_LocusAmpRate_thres4 = 
+  data.frame(Locus_id = names(Peru_LocusAmpRate_thres4),
+             Chrom = gsub(
+               '_\\d+$',
+               '',
+               names(Peru_LocusAmpRate_thres4)),
+             Pos = as.integer(gsub(
+               '^.+_',
+               '',
+               names(Peru_LocusAmpRate_thres4))),
+             AmpRate = Peru_LocusAmpRate_thres4,
+             Threshold = 5)
+
+
+Venezuela_LocusAmpRate_thres4 = LocusAmplRate(Venezuela_rGenome, update = FALSE, threshold = 4, n =100)
+
+Venezuela_LocusAmpRate_thres4 = 
+  data.frame(Locus_id = names(Venezuela_LocusAmpRate_thres4),
+             Chrom = gsub(
+               '_\\d+$',
+               '',
+               names(Venezuela_LocusAmpRate_thres4)),
+             Pos = as.integer(gsub(
+               '^.+_',
+               '',
+               names(Venezuela_LocusAmpRate_thres4))),
+             AmpRate = Venezuela_LocusAmpRate_thres4,
+             Threshold = 5)
+```
+
+10. Manhattan plot the of the proportion of amplified samples by loci and by country.
+
+```{r, fig.height=8, fig.width=6, fig.cap='Manhattan plot the of the proportion of amplified samples by loci and by country'}
+ggdraw() + 
+  draw_plot(
+    Read_Depth_Summ %>%
+  filter(grepl('_01_', Chrom), Country == 'Venezuela')%>% ggplot(aes(x = Pos, y = mean_ReadDepth)) + 
+  geom_line() +
+  facet_grid(.~Chrom)+
+  theme_bw()+
+  theme(axis.text.x = element_blank(),
+        legend.position = 'none',
+        axis.title.x = element_blank())+
+    labs(y = 'Mean read depth)'),
+  x = .5,
+  y = .75,
+  heigh = .25,
+  width = .5
+  )+
+  draw_plot(
+    Venezuela_LocusAmpRate_thres0 %>%
+  filter(grepl('_01_', Chrom))%>% ggplot(aes(x = Pos, y = AmpRate)) + 
+  geom_point(alpha = .3, size = .25) +
+  theme_bw()+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())+
+    labs(y = 'Amp. rate (thres = 1)'),
+  x = .5,
+  y = .5,
+  heigh = .25,
+  width = .5
+  )+
+  draw_plot(
+    Venezuela_LocusAmpRate_thres4 %>%
+  filter(grepl('_01_', Chrom))%>% ggplot(aes(x = Pos, y = AmpRate)) + 
+  geom_point(alpha = .3, size = .25) +
+  theme_bw()+
+  theme(axis.text.x = element_blank())+
+    labs(y = 'Amp. rate (thres = 5)',
+         x = 'Venezuela'),
+  x = .5,
+  y = .25,
+  heigh = .25,
+  width = .5
+  ) + 
+  draw_plot(
+    Read_Depth_Summ %>%
+  filter(grepl('_01_', Chrom), Country == 'Peru')%>% ggplot(aes(x = Pos, y = mean_ReadDepth)) + 
+  geom_line() +
+  facet_grid(.~Chrom)+
+  theme_bw()+
+  theme(axis.text.x = element_blank(),
+        legend.position = 'none',
+        axis.title.x = element_blank())+
+    labs(y = 'Mean read depth'),
+  x = 0,
+  y = .75,
+  heigh = .25,
+  width = .5
+  )+
+  draw_plot(
+    Peru_LocusAmpRate_thres0 %>%
+  filter(grepl('_01_', Chrom))%>% ggplot(aes(x = Pos, y = AmpRate)) + 
+  geom_point(alpha = .3, size = .25) +
+  theme_bw()+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank())+
+    labs(y = 'Amp. rate (thres = 1)'),
+  x = 0,
+  y = .5,
+  heigh = .25,
+  width = .5
+  )+
+  draw_plot(
+    Peru_LocusAmpRate_thres4 %>%
+  filter(grepl('_01_', Chrom))%>% ggplot(aes(x = Pos, y = AmpRate)) + 
+  geom_point(alpha = .3, size = .25) +
+  theme_bw()+
+  theme(axis.text.x = element_blank())+
+    labs(y = 'Amp. rate (thres = 5)',
+         x = 'Peru'),
+  x = 0,
+  y = .25,
+  heigh = .25,
+  width = .5
+  ) +
+  draw_plot(data.frame(Country = 'Venezuela',
+           mean_ReadDepth = Read_Depth_Summ %>%
+  filter(grepl('_01_', Chrom), Country == 'Venezuela') %>%
+  select(mean_ReadDepth) %>% unlist(),
+  LocusAmpRate = Venezuela_LocusAmpRate_thres4 %>%
+  filter(grepl('_01_', Chrom)) %>%
+  select(AmpRate) %>% unlist()
+  )%>%
+  ggplot(aes(x = mean_ReadDepth, y = LocusAmpRate))+
+  geom_point(alpha = .3)+
+  theme_bw()+
+  theme(legend.position = 'none') + 
+    labs(y = 'Amp. rate (thres = 5)',
+         x = 'Mean RD'),
+  x = .5,
+  y = 0,
+  heigh = .25,
+  width = .5) +
+  draw_plot(data.frame(Country = 'Peru',
+           mean_ReadDepth = Read_Depth_Summ %>%
+  filter(grepl('_01_', Chrom), Country == 'Peru') %>%
+  select(mean_ReadDepth) %>% unlist(),
+  LocusAmpRate = Venezuela_LocusAmpRate_thres4 %>%
+  filter(grepl('_01_', Chrom)) %>%
+  select(AmpRate) %>% unlist()
+  )%>%
+  ggplot(aes(x = mean_ReadDepth, y = LocusAmpRate))+
+  geom_point(alpha = .3)+
+  theme_bw()+
+  theme(legend.position = 'none') + 
+    labs(y = 'Amp. rate (thres = 5)',
+         x = 'Mean RD'),
+  x = 0,
+  y = 0,
+  heigh = .25,
+  width = .5)
+  
+```
+
+11. Mask alleles with less than 5 reads of coverage 
 
 ```{r}
-Pviv_rGenome_object@data$metadata %>% ggplot(aes(x = SampleAmplRate, fill = Country))+
+# rm(Peru_rGenome)
+# rm(Venezuela_rGenome)
+Pviv_rGenome_thres5 = Pviv_rGenome_object
+
+Pviv_rGenome_thres5@gt = prune_alleles(Pviv_rGenome_thres5, threshold = 4, n = 100)
+```
+
+12. Check the distribution of the amplification rate of the samples using a histogram
+
+```{r}
+
+Pviv_rGenome_thres5@metadata$SampAmpRate = SampAmpRate_summ %>% filter(Threshold == 5) %>% select(AmpRate) %>% unlist
+
+Pviv_rGenome_thres5@metadata %>% ggplot(aes(x = SampAmpRate, fill = Country))+
   geom_histogram(position = 'stack', binwidth = .05, color = 'gray40')+
   theme_bw()+
   labs(title = 'Sample Amplification Rate distribution',
@@ -207,40 +657,49 @@ Pviv_rGenome_object@data$metadata %>% ggplot(aes(x = SampleAmplRate, fill = Coun
 
 ```
 
-3.3 Remove samples with less than 75% of amplified loci (> 25% of missing data)
+13 Remove samples with less than 50% of amplified loci
 
 ```{r}
-Pviv_rGenome_object = filter_samples(obj = Pviv_rGenome_object, v =
-                Pviv_rGenome_object@data$metadata$SampleAmplRate >= .75)
+Pviv_rGenome_thres5 = filter_samples(obj = Pviv_rGenome_thres5, v =
+                Pviv_rGenome_thres5@metadata$SampAmpRate >= .5)
 ```
 
-4. Remove monomorphic sites
+14. Remove monomorphic sites
 
-4.1 Update allele counts
+14.1 Update allele counts
 
 ```{r}
 
-Pviv_rGenome_object@data$loci_table = cbind(Pviv_rGenome_object@data$loci_table,
-                                       get_AC(obj = Pviv_rGenome_object))
+allele_counts = NULL
+
+test = get_AC(obj = Pviv_rGenome_thres5, w = w, n = 100)
+
+for(w in 1:100){
+  allele_counts = rbind(allele_counts, get_AC(obj = Pviv_rGenome_thres5, w = w, n = 100))
+  print(w)
+}
+
+Pviv_rGenome_thres5@loci_table = cbind(Pviv_rGenome_thres5@loci_table,
+                                       allele_counts)
 ```
 
-4.2 Filter monomorphic sites
+14.2 Filter monomorphic sites
 ```{r}
-Pviv_rGenome_object = filter_loci(Pviv_rGenome_object,
-                             v = Pviv_rGenome_object@data$loci_table$Cardinality > 1)
+Pviv_rGenome_thres5 = filter_loci(Pviv_rGenome_thres5,
+                             v = Pviv_rGenome_thres5@loci_table$Cardinality > 1)
 ```
 
-5. Remove loci with high missing data
+15. Remove loci with high missing data
 
-5.1 Calculate the amplification rate of each loci
+15.1 Calculate the amplification rate of each loci
 ```{r}
-Pviv_rGenome_object = LocusAmplRate(Pviv_rGenome_object)
+Pviv_rGenome_thres5 = LocusAmplRate(Pviv_rGenome_thres5)
 ```
 
-5.2 Check the distribution of the amplification rate of the samples using a histogram
+15.2 Check the distribution of the amplification rate of the samples using a histogram
 
 ```{r}
-Pviv_rGenome_object@data$loci_table %>%
+Pviv_rGenome_thres5@loci_table %>%
     mutate(CHROM2  = gsub('(^(\\d|P|v)+_|_v1)', '',CHROM))%>%
     ggplot(aes(x = POS, y = LocusAmplRate)) +
     geom_point(alpha = 0.7, size = .25) +
@@ -252,77 +711,78 @@ Pviv_rGenome_object@data$loci_table %>%
 
 ```
 
-5.3 Filter loci with amplification rate below .75
+15.3 Filter loci with amplification rate below .75
 ```{r}
-Pviv_rGenome_object = filter_loci(Pviv_rGenome_object, v = Pviv_rGenome_object@data$loci_table$LocusAmplRate >= .75)
+Pviv_rGenome_thres5 = filter_loci(Pviv_rGenome_thres5, v = Pviv_rGenome_thres5@loci_table$LocusAmplRate >= .75)
 ```
 
-6. Update alternative alleles
+16. Update alternative alleles
 
 ```{r}
-Pviv_rGenome_object@data$loci_table$ALT =
-  ifelse(Pviv_rGenome_object@data$loci_table$REF !=
+Pviv_rGenome_thres5@loci_table$ALT =
+  ifelse(Pviv_rGenome_thres5@loci_table$REF !=
            gsub(',([ATCG]|\\*)+',
                 '',
                 gsub(':\\d+',
                      '',
-                     Pviv_rGenome_object@data$loci_table$Alleles)),
+                     Pviv_rGenome_thres5@loci_table$Alleles)),
          gsub(':\\d+',
               '',
-              Pviv_rGenome_object@data$loci_table$Alleles),
+              Pviv_rGenome_thres5@loci_table$Alleles),
          gsub('^([ATCG]|\\*)+,',
               '',
-              gsub(':\\d+', '', Pviv_rGenome_object@data$loci_table$Alleles))
+              gsub(':\\d+', '', Pviv_rGenome_thres5@loci_table$Alleles))
        )
 ```
 
-#### Step 2.2: Homopolymers and Short tandem repeats
+### Step 3: Filter of potential PCR genotyping artifacts (Homopolymers & Short Tandem Repeats)
 
-7. Differentiate between SNPs, INDELS, Homopolymers and Short tandem repeats
+#### Step 3.1 Clasify SNPs, INDELS, Homopolymers and Short tandem repeats
+17. Differentiate between SNPs, INDELS, Homopolymers and Short tandem repeats
 
 ```{r}
-Pviv_rGenome_object@data$loci_table$TypeOf_Markers =
-  TypeOf_Marker(Pviv_rGenome_object, w = 1, n = 1)
+Pviv_rGenome_thres5@loci_table$TypeOf_Markers =
+  TypeOf_Marker(Pviv_rGenome_thres5, w = 1, n = 1)
 ```
 
-##### Effect of PCR genotyping artifacts on heterozygosity
+#### Step 3.2 Effect of PCR genotyping artifacts on heterozygosity
 
-8. Get Proportion of Heterozygous samples per site
+18. Get Proportion of Heterozygous samples per site
 
 ```{r}
-Pviv_rGenome_object@data$loci_table$ObsHet = get_ObsHet(Pviv_rGenome_object, by = 'loci', w = 1, n = 1)
+Pviv_rGenome_thres5@loci_table$ObsHet = get_ObsHet(Pviv_rGenome_thres5, by = 'loci', w = 1, n = 1)
 ```
 
-9. Calculate fraction of Heterozygous samples per Alternative alleles per site
+19. Calculate fraction of Heterozygous samples per Alternative alleles per site
 
 ```{r}
-Pviv_rGenome_object@data$loci_table$frac_ofHet_pAlts =
-  frac_ofHet_pAlt(Pviv_rGenome_object, w = 1, n = 1)
+Pviv_rGenome_thres5@loci_table$frac_ofHet_pAlts =
+  frac_ofHet_pAlt(Pviv_rGenome_thres5, w = 1, n = 1)
 ```
 
-10. Classify sites based on the proportion of alternative alleles in polyclonal samples per site
+20. Classify sites based on the proportion of alternative alleles in polyclonal samples per site
 
-10.1 Distribution of the fraction of alternative alleles in polyclonal samples
+20.1 Distribution of the fraction of alternative alleles in polyclonal samples
 
 ```{r}
-Pviv_rGenome_object@data$loci_table %>% ggplot(aes(x = frac_ofHet_pAlts))+
+Pviv_rGenome_thres5@loci_table %>% ggplot(aes(x = frac_ofHet_pAlts))+
     geom_histogram(binwidth = 0.01)+
     labs(x = 'Fraction of heterozygous samples per alternative allele per site',
          y = 'Number of sites (Loci)')+
     theme_bw()
 ```
-10.2 Classify sites based on the proportion of alternative alleles in polyclonal samples per site
+20.2 Classify sites based on the proportion of alternative alleles in polyclonal samples per site
 ```{r}
-Pviv_rGenome_object@data$loci_table %<>% mutate(ALT_FILTER =case_when(
+Pviv_rGenome_thres5@loci_table %<>% mutate(ALT_FILTER =case_when(
     frac_ofHet_pAlts == 1 ~ '100%',
     frac_ofHet_pAlts < 1 & frac_ofHet_pAlts > .5 ~ '50 - 99%',
     frac_ofHet_pAlts <= .5 ~ '<=50%',
   ))
 ```
 
-10.3 Distribution of observed heterozygosity per locus, by type of marker, by group (defined in previuos step 10.2)
+20.3 Distribution of observed heterozygosity per locus, by type of marker, by group (defined in previuos step 10.2)
 ```{r}
-Pviv_rGenome_object@data$loci_table %>%
+Pviv_rGenome_thres5@loci_table %>%
     ggplot(aes(x = ObsHet,
                fill = factor(ALT_FILTER,
                              levels = c('<=50%', '50 - 99%', '100%'))))+
@@ -344,23 +804,23 @@ Pviv_rGenome_object@data$loci_table %>%
     theme_bw()
 ```
 
-11. Remove Homopolymers and DiSTRs
+21. Remove Homopolymers and DiSTRs
 
 ```{r}
-Pviv_rGenome_object = filter_loci(Pviv_rGenome_object,
-            v = !(Pviv_rGenome_object@data$loci_table$TypeOf_Markers %in%
+Pviv_rGenome_thres5 = filter_loci(Pviv_rGenome_thres5,
+            v = !(Pviv_rGenome_thres5@loci_table$TypeOf_Markers %in%
                     c('INDEL:Homopolymer', 'INDEL:Dinucleotide_STR')))
 ```
 
-### Step 3: Filter of problematic genomic regions to map reads
+### Step 4: Filter of problematic genomic regions to map the reads
 
-#### Regions with excess of Heterozygosity
-12. Distribution of proportion of heterozygous per site by sites with \<= 50% Het/Alt, 50 - 99% Het/Alt and 100% of Het/Alt
+#### Step 4.1: Regions with excess of Heterozygosity
+22. Distribution of proportion of heterozygous per site by sites with \<= 50% Het/Alt, 50 - 99% Het/Alt and 100% of Het/Alt
 
 ```{r}
   # In that way we identify that maximum fraction of Heterozygous samples per loci is 0.4855491
   
-Pviv_rGenome_object@data$loci_table %>%
+Pviv_rGenome_thres5@loci_table %>%
     mutate(TypeOf_Markers2 = case_when(
       TypeOf_Markers == 'SNP' ~ 'SNP',
       TypeOf_Markers != 'SNP' ~ 'INDELs'),
@@ -376,15 +836,15 @@ Pviv_rGenome_object@data$loci_table %>%
           axis.title.x = element_blank())
 ```
 
-13. Calculate the average of heterozygous samples per site per gene
+23. Calculate the average of heterozygous samples per site per gene
 
 ```{r}
-Pviv_rGenome_object@data$loci_table = mean_ObsHet(Pviv_rGenome_object, gff = '../reference/genes.gff')
+Pviv_rGenome_thres5@loci_table = mean_ObsHet(Pviv_rGenome_thres5, gff = '../reference/genes.gff')
 ```
 
-14. Define a threshold for trusted variants
+24. Define a threshold for trusted variants
 ```{r}
-ObsHet_Threshold = quantile(Pviv_rGenome_object@data$loci_table %>%
+ObsHet_Threshold = quantile(Pviv_rGenome_thres5@loci_table %>%
                                 filter(ALT_FILTER == '<=50%', TypeOf_Markers == 'SNP') %>%
                                 group_by(gene_id) %>%
                                 dplyr::summarise(mean_ObsHet = max(mean_ObsHet)) %>%
@@ -392,9 +852,9 @@ ObsHet_Threshold = quantile(Pviv_rGenome_object@data$loci_table %>%
                                 unlist, .95)
 ```
 
-15. Visualize the Average Observed Heteozygosity in SNPs per genomic position
+25. Visualize the Average Observed Heteozygosity in SNPs per genomic position
 ```{r}
-Pviv_rGenome_object@data$loci_table %>%
+Pviv_rGenome_thres5@loci_table %>%
     filter(ALT_FILTER == '<=50%', TypeOf_Markers == 'SNP') %>%
     group_by(gene_id) %>%
     dplyr::summarise(mean_ObsHet = max(mean_ObsHet)) %>%
@@ -405,17 +865,17 @@ Pviv_rGenome_object@data$loci_table %>%
     theme_bw()
 ```
 
-16. Differentiate genomic regions that PASS the threshold
+26. Differentiate genomic regions that PASS the threshold
 ```{r}
-Pviv_rGenome_object@data$loci_table %<>% mutate(ObsHet_Filter = case_when(
+Pviv_rGenome_thres5@loci_table %<>% mutate(ObsHet_Filter = case_when(
     mean_ObsHet > ObsHet_Threshold ~ 'OUT',
     mean_ObsHet <= ObsHet_Threshold ~ 'PASS'
   ))
 ```
 
-17. Visualize which genomic regions PASS the filter
+27. Visualize which genomic regions PASS the filter
 ```{r}
-Pviv_rGenome_object@data$loci_table %>%
+Pviv_rGenome_thres5@loci_table %>%
     mutate(TypeOf_Markers2 = case_when(
       TypeOf_Markers == 'SNP' ~ 'SNP',
       TypeOf_Markers != 'SNP' ~ 'INDEL'),
@@ -433,23 +893,23 @@ Pviv_rGenome_object@data$loci_table %>%
           axis.text.x = element_blank())
 ```
 
-#### Regions with excess of density of Polymorphism
+#### Step 4.2: Regions with excess of density of Polymorphism
 
-18. Calculate the density of SNPs per genomic region and define a threshold
+28. Calculate the density of SNPs per genomic region and define a threshold
 ```{r}
-Pviv_rGenome_object@data$loci_table = SNP_density(Pviv_rGenome_object, gff = '../reference/genes.gff')
+Pviv_rGenome_thres5@loci_table = SNP_density(Pviv_rGenome_thres5, gff = '../reference/genes.gff')
 
-SNP_density_threshold = quantile(Pviv_rGenome_object@data$loci_table %>%
+SNP_density_threshold = quantile(Pviv_rGenome_thres5@loci_table %>%
                                      filter(TypeOf_Markers == 'SNP') %>%
                                      group_by(gene_id) %>%
                                      dplyr::summarise(SNP_density = max(SNP_density)) %>%
                                      select(SNP_density) %>%
-                                     unlist, .95)
+                                     unlist, .925)
 ```
 
-19. Distribution of SNP density
+29. Distribution of SNP density
 ```{r}
-Pviv_rGenome_object@data$loci_table %>%
+Pviv_rGenome_thres5@loci_table %>%
     filter(TypeOf_Markers == 'SNP') %>%
     group_by(gene_id) %>%
     dplyr::summarise(SNP_density = max(SNP_density)) %>%
@@ -460,18 +920,18 @@ Pviv_rGenome_object@data$loci_table %>%
     theme_bw()
 ```
 
-20. Differentiate/Filter genomic regions that PASS the threshold
+30. Differentiate/Filter genomic regions that PASS the threshold
 ```{r}
-Pviv_rGenome_object@data$loci_table %<>% 
+Pviv_rGenome_thres5@loci_table %<>% 
   mutate(SNP_density_Filter = case_when(
     SNP_density > SNP_density_threshold ~ 'OUT',
     SNP_density <= SNP_density_threshold ~ 'PASS'
   ))
 ```
 
-21. Visualize which genomic regions PASS the filter
+31. Visualize which genomic regions PASS the filter
 ```{r}
-Pviv_rGenome_object@data$loci_table %>%
+Pviv_rGenome_thres5@loci_table %>%
     mutate(TypeOf_Markers2 = case_when(
       TypeOf_Markers == 'SNP' ~ 'SNP',
       TypeOf_Markers != 'SNP' ~ 'INDEL'),
@@ -486,19 +946,19 @@ Pviv_rGenome_object@data$loci_table %>%
           axis.text.x = element_blank())
 ```
 
-22. Differentiate of problematic genomic regions to map reads
+32. Differentiate of problematic genomic regions to map reads
 
 ```{r}
-Pviv_rGenome_object@data$loci_table %<>%
+Pviv_rGenome_thres5@loci_table %<>%
   mutate(Alignment_Filter = case_when(
     ObsHet_Filter == 'OUT' & SNP_density_Filter == 'OUT' ~ 'OUT',
     !(ObsHet_Filter == 'OUT' & SNP_density_Filter == 'OUT') ~ 'PASS'
   ))
 ```
 
-23. Visualize which genomic regions PASS the filter
+33. Visualize which genomic regions PASS the filter
 ```{r}
-Pviv_rGenome_object@data$loci_table %>%
+Pviv_rGenome_thres5@loci_table %>%
     mutate(TypeOf_Markers2 = case_when(
       TypeOf_Markers == 'SNP' ~ 'SNP',
       TypeOf_Markers != 'SNP' ~ 'INDEL'),
@@ -514,66 +974,163 @@ Pviv_rGenome_object@data$loci_table %>%
 
 ```
 
-24. Check which genomic regions or genes are removed
+34. Check which genomic regions or genes are removed
 ```{r}
-Pviv_rGenome_object@data$loci_table %>% 
+Pviv_rGenome_thres5@loci_table %>% 
   filter(Alignment_Filter == 'OUT') %>% 
   select(gene_id) %>% 
   unique()
 ```
 
-25. Remove problematic genomic regions to map reads
+35. Remove problematic genomic regions to map reads
 ```{r}
-Pviv_rGenome_object = 
-  filter_loci(Pviv_rGenome_object,
-              v = Pviv_rGenome_object@data$loci_table$Alignment_Filter == 'PASS')
+Pviv_rGenome_filtered = 
+  filter_loci(Pviv_rGenome_thres5,
+              v = Pviv_rGenome_thres5@loci_table$Alignment_Filter == 'PASS')
 ```
 
-# Section 2: Differentiating monoclonal and polyclonal infections
-
-26. Define the fraction of heterozygous loci per sample
+# Section 2: Merging with other datasets (Pending)
 
 ```{r}
-Pviv_rGenome_object@data$metadata$fracHet = 
-  get_ObsHet(obj = Pviv_rGenome_object, by = 'sample')
+write.table(Pviv_rGenome_filtered@loci_table %>% select(CHROM, POS), 'selected_pos.bed', row.names = FALSE, quote = FALSE)
+
+load('genomics_Pvivax_pv4.RData')
+load('genomics_Pvivax_LAC.RData')
+
+# Merging with Colombian data set----
+
+# Add metadata
+Colombia_rGenome@metadata = merge(Colombia_rGenome@metadata, external_metadata, by = 'Sample_id', all.x = T)
+
+## Remove controls
+Colombia_rGenome = filter_samples(Colombia_rGenome, v = grepl('^(SP|Col)',Colombia_rGenome@metadata$Sample_id))
+
+## Calculate the Amplification rate of the samples and remove samples with Amplification rate bellow 50%
+Colombia_rGenome = SampleAmplRate(Colombia_rGenome, update = T)
+
+Colombia_rGenome = filter_samples(Colombia_rGenome, v = Colombia_rGenome@metadata$SampleAmplRate >= .5)
+
+## Update alleles
+Colombia_rGenome@loci_table = cbind(Colombia_rGenome@loci_table, get_AC(Colombia_rGenome, w = 1, n = 1, update_alleles = T))
+
+## Calculate the amplification rate of each locus
+Colombia_rGenome = LocusAmplRate(Colombia_rGenome, update = T)
+
+## Remove loci with amplification rate bellow .75
+Colombia_rGenome = filter_loci(Colombia_rGenome, v = Colombia_rGenome@loci_table$LocusAmplRate >= .75)
+
+# Merge PerVen_rGenome with Colombia_rGenome
+
+PerVenCol_rGenome = merge_rGenome(Pviv_rGenome_filtered, Colombia_rGenome)
+
+PerVenCol_rGenome@loci_table = cbind(PerVenCol_rGenome@loci_table, get_AC(PerVenCol_rGenome))
+
+PerVenCol_rGenome@loci_table = PerVenCol_rGenome@loci_table[-5]
+
+PerVenCol_rGenome = filter_samples(PerVenCol_rGenome, v = !grepl('^NA', rownames(PerVenCol_rGenome@metadata)))
+
+save.image('backup.RData')
+
+# Merging with Guyana data set----
+
+## Remove data already present in PerVenCol_rGenome
+
+Guyana_rGenome = filter_samples(Guyana_rGenome, v = !(Guyana_rGenome@metadata$Sample_id %in% PerVenCol_rGenome@metadata$Sample_id))
+
+## Add Metadata
+
+Guyana_rGenome@metadata = data.frame(Sample_id = Guyana_rGenome@metadata)
+
+Guyana_rGenome@metadata %<>% mutate(Country = case_when(
+  grepl('^G', Sample_id) ~ 'Guyana',
+  grepl('^Nicanor', Sample_id) ~ 'Panama?'
+))
+
+rownames(Guyana_rGenome@metadata) = Guyana_rGenome@metadata$Sample_id
+
+Guyana_rGenome = filter_samples(Guyana_rGenome, v = !is.na(Guyana_rGenome@metadata$Country))
+
+# Calculate the Amplification rate of the samples and remove samples with Amplification rate bellow 50%
+Guyana_rGenome = SampleAmplRate(Guyana_rGenome, update = T)
+
+Guyana_rGenome = filter_samples(Guyana_rGenome, v = Guyana_rGenome@metadata$SampleAmplRate >= .5)
+
+# Update alleles
+Guyana_rGenome@loci_table = cbind(Guyana_rGenome@loci_table, get_AC(Guyana_rGenome, w = 1, n = 1, update_alleles = T))
+
+# Calculate the amplification rate of each locus
+Guyana_rGenome = LocusAmplRate(Guyana_rGenome, update = T)
+
+# Remove loci with amplification rate bellow .75
+Guyana_rGenome = filter_loci(Guyana_rGenome, v = Guyana_rGenome@loci_table$LocusAmplRate >= .75)
+
+# Merge PerVen_rGenome with Guyana_rGenome
+
+View(Guyana_rGenome@loci_table)
+
+PerVenColGuy_rGenome = merge_rGenome(PerVenCol_rGenome, Guyana_rGenome)
+
+PerVenColGuy_rGenome@loci_table = cbind(PerVenColGuy_rGenome@loci_table, get_AC(PerVenColGuy_rGenome))
+
+PerVenColGuy_rGenome@loci_table = PerVenColGuy_rGenome@loci_table[-5]
+
+names(PerVenColGuy_rGenome@loci_table)
+
+save.image('backup.RData')
+
+
 
 ```
 
-27. Within host divergence (Fws) per sample
+
+
+
+
+# Section 3: Differentiating monoclonal and polyclonal infections
+
+36. Define the fraction of heterozygous loci per sample
 
 ```{r}
-Pviv_rGenome_object@data$metadata$Fws = 
-  get_Fws(obj = Pviv_rGenome_object, w = 1, n = 1)
+Pviv_rGenome_filtered@metadata$fracHet = 
+  get_ObsHet(obj = Pviv_rGenome_filtered, by = 'sample')
+
 ```
 
-28. Visualize distribution of Heterozygosity and Fws
+37. Within host divergence (Fws) per sample
+
 ```{r}
-Pviv_rGenome_object@data$metadata %>%
-  ggplot(aes(x = fracHet, y = Fws))+
+Pviv_rGenome_filtered@metadata$Fws = 
+  get_Fws(obj = Pviv_rGenome_filtered, w = 1, n = 1)
+```
+
+38. Defining Monoclonal, Highly related polyclonal, and Polyclonal infections
+
+```{r}
+Pviv_rGenome_filtered@metadata %<>% 
+  mutate(Clonality = case_when(
+    Fws >= .95 & fracHet <= .015 ~ 'Monoclonal',
+    !((Fws >= .95 & fracHet <= .015) | (Fws < .92 | fracHet > .03)) ~ 'Highly related Polyclonal',
+    Fws < .92 | fracHet > .03 ~ 'Polyclonal'
+  ))
+```
+
+39. Visualize distribution of Heterozygosity and Fws
+```{r}
+Pviv_rGenome_filtered@metadata %>%
+  ggplot(aes(x = fracHet, y = Fws, color = Clonality))+
   geom_point()+
-  geom_hline(yintercept = .97)+
-  geom_hline(yintercept = .88)+
+  geom_hline(yintercept = .95)+
+  geom_hline(yintercept = .92)+
   geom_vline(xintercept = .015)+
-  geom_vline(xintercept = .06)+
+  geom_vline(xintercept = .03)+
   facet_grid(.~Country)+
   labs(x = 'Fraction of heterozygous loci')+
   theme_bw()
 ```
 
-29. Defining Monoclonal, Highly related polyclonal, and Polyclonal infections
-
+40. Save data
 ```{r}
-Pviv_rGenome_object@data$metadata %<>% 
-  mutate(Clonality = case_when(
-    Fws >= .97  ~ 'Monoclonal',
-    Fws < .97 & Fws >= .88 ~ 'Highly related Polyclonal',
-    Fws < .88 ~ 'Polyclonal'
-  ))
-```
-
-30. Save data
-```{r}
-rm(list = ls()[-grep('Pviv_rGenome_object',ls())])
+rm(list = ls()[-grep('Pviv_rGenome_filtered',ls())])
 
 save.image('../GeneticDiversity/PerVen_Pviv_filtered_rGenome.RData')
 ```

@@ -221,6 +221,8 @@ run_vcftools = function(vcf = NULL,
   
   vcf_run_file = c(vcf_run_file, vcf_arguments)
   
+  print(vcf_arguments)
+  
   write.table(vcf_run_file, bash_file, row.names = FALSE, quote = FALSE, col.names = FALSE)
   
   system(paste0('chmod 777 ', bash_file))
@@ -269,9 +271,9 @@ load_vcf = function(vcf = NULL,
 ## rGenome S4 class
 
 setClass('rGenome', slots = c(
-  gt = 'matrix',
-  loci_table = 'data.frame',
-  metadata = 'data.frame'
+  gt = "ANY",
+  loci_table = "ANY",
+  metadata = "ANY"
 ))
 
 ## rGenome constructor
@@ -291,14 +293,14 @@ rGenome = function(gt = NULL,
 vcf2rGenome = function(vcf, n = 500, threshold = 5) {
             
             # Generate metadata
-            metadata = data.frame(Sample_id = names(vcf_object)[-1:-9])
+            metadata = data.frame(Sample_id = names(vcf)[-1:-9])
             rownames(metadata) = metadata[['Sample_id']]
             
             # generate loci_table
             loci_table = vcf[,c(1,2,4,5)]
             rownames(loci_table) = paste(loci_table$CHROM, loci_table$POS, sep = '_')
             
-            # generate a genotype table (gt)
+            # generate a haplotype table (gt)
             
             gt = NULL
             for(w in 1:n){
@@ -316,35 +318,53 @@ vcf2rGenome = function(vcf, n = 500, threshold = 5) {
 
 # SampleAmplRate----
 
-setGeneric("SampleAmplRate", function(obj) standardGeneric("SampleAmplRate"))
+setGeneric("SampleAmplRate", function(obj, update = TRUE, threshold = NULL, n = 100) standardGeneric("SampleAmplRate"))
 
 setMethod("SampleAmplRate", signature(obj = "rGenome"),
           
-          function(obj) {
+          function(obj, update = TRUE, threshold = NULL, n = 100) {
             
             obj2 = obj
             
-            obj2@metadata[['SampleAmplRate']] =
-              1 - colSums(is.na(obj2@gt))/nrow(obj2@gt)
+            if(!is.null(threshold)){
+              obj2@gt = prune_alleles(obj = obj2, threshold = threshold, n = n)
+            }
             
-            return(obj2)
+            if(update){
+              obj2@metadata[['SampleAmplRate']] =
+                1 - colSums(is.na(obj2@gt))/nrow(obj2@gt)
+              return(obj2)
+            }else{
+              result = 1 - colSums(is.na(obj2@gt))/nrow(obj2@gt)
+              return(result)
+            }
+            
           }
 )
 
 # LocusAmplRate----
 
-setGeneric("LocusAmplRate", function(obj) standardGeneric("LocusAmplRate"))
+setGeneric("LocusAmplRate", function(obj, update = TRUE, threshold = NULL, n = 100) standardGeneric("LocusAmplRate"))
 
 setMethod("LocusAmplRate", signature(obj = "rGenome"),
           
-          function(obj) {
+          function(obj, update = TRUE, threshold = NULL, n = 100) {
             
             obj2 = obj
             
-            obj2@loci_table[['LocusAmplRate']] =
-              1 - rowSums(is.na(obj2@gt))/ncol(obj2@gt)
+            if(!is.null(threshold)){
+              obj2@gt = prune_alleles(obj = obj2, threshold = threshold, n = n)
+            }
             
-            return(obj2)
+            if(update){
+              obj2@loci_table[['LocusAmplRate']] =
+                1 - rowSums(is.na(obj2@gt))/ncol(obj2@gt)
+              return(obj2)
+            }else{
+              result = 1 - rowSums(is.na(obj2@gt))/ncol(obj2@gt)
+              return(result)
+            }
+            
           }
 )
 
@@ -374,9 +394,18 @@ setMethod("filter_loci", signature(obj = "rGenome"),
           function(obj, v = NULL) {
             
             obj2 = obj
-            
             obj2@gt = obj2@gt[v,]
             obj2@loci_table = obj2@loci_table[v,]
+            
+            if(is.null(nrow(obj2@gt))){
+              
+              obj2@gt = matrix(obj2@gt, nrow = 1, ncol = length(obj2@gt),
+                               dimnames = list(
+                                 rownames(obj2@loci_table),
+                                 names(obj2@gt)
+                               ))
+              
+            }
             
             return(obj2)
           }
@@ -391,28 +420,44 @@ handle_ploidy = function(gt, monoclonals, polyclonals, w = 1, n = 1){
   high = s[w+1]-1
   
   if(sum(grepl(':', gt)) > 0){
-    
-    gt = matrix(gsub(':\\d+', '', gt[low:high,]), nrow = high - low + 1, ncol = ncol(gt),
-                dimnames = list(rownames(gt)[low:high], colnames(gt)))
-    
+      gt = matrix(gsub(':\\d+', '', gt[low:high,]), nrow = high - low + 1, ncol = ncol(gt),
+                  dimnames = list(rownames(gt)[low:high], colnames(gt)))
   }
   
-  if(sum(grepl('/', gt)) == 0){
-    
-    gt3 = gt
-    
-  }else if(is.null(monoclonals) & is.null(polyclonals)){
+  # if(sum(grepl('/', gt)) == 0){
+  #   
+  #   gt3 = gt
+  #   
+  # }else
+  
+  if(is.null(monoclonals) & is.null(polyclonals)){
     gt1 = gsub('/\\d+', '', gt)
     gt2 = gsub('\\d+/', '', gt)
     gt2[gt2==gt1] = NA
     gt3 = cbind(gt1, gt2)
   }else{
-    gt_mono = gt[,monoclonals]
+    gt_mono = matrix(gt[,monoclonals],
+                     nrow = nrow(gt),
+                     ncol = length(monoclonals),
+                     dimnames = list(rownames(gt), monoclonals))
+    
     gt_mono = gsub('/\\d+', '', gt_mono)
     
-    gt_poly = gt[,polyclonals]
+    
+    gt_poly = matrix(gt[,polyclonals],
+                     nrow = nrow(gt),
+                     ncol = length(polyclonals),
+                     dimnames = list(rownames(gt), polyclonals)
+                     )
     gt_poly1 = gsub('/\\d+', '', gt_poly)
+    
     gt_poly2 = gsub('\\d+/', '', gt_poly)
+    
+    if(!is.null(polyclonals)){
+      colnames(gt_poly1) = paste(colnames(gt_poly1), 'C1', sep = '_')
+      colnames(gt_poly2) = paste(colnames(gt_poly2), 'C2', sep = '_')
+    }
+    
     gt3 = cbind(gt_mono, gt_poly1, gt_poly2)
   }
   
@@ -475,7 +520,7 @@ setMethod("get_AC", signature(obj = "rGenome"),
             }else{
               colnames(alleles) = c('Cardinality', 'Allele_Counts')
             }
-            rownames(alleles) = rownames(gt)
+            rownames(alleles) = rownames(gt3)
             alleles$Cardinality = as.integer(alleles$Cardinality)
             
             return(alleles)
@@ -1238,13 +1283,13 @@ setMethod("frac_ofHet_pAlt", signature(obj = "rGenome"),
               temp_gts = gt[variant,]
               alleles = strsplit(alt[variant], ',')[[1]]
               
-              genotypes = sapply(alleles,
+              haplotypes = sapply(alleles,
                                  function(allele){
-                                   genotypes = grepl(allele, temp_gts)})
+                                   haplotypes = grepl(allele, temp_gts)})
               
-              het_genotypes = (genotypes == 1 & HetPos[variant,] == 1)    
+              het_haplotypes = (haplotypes == 1 & HetPos[variant,] == 1)    
               
-              sum(het_genotypes, na.rm = T)/sum(genotypes, na.rm = T)
+              sum(het_haplotypes, na.rm = T)/sum(haplotypes, na.rm = T)
             })
             
             return(frac_ofHet_pAlt)
@@ -1252,7 +1297,7 @@ setMethod("frac_ofHet_pAlt", signature(obj = "rGenome"),
           }
           )
 
-# Get genotype matrix----
+# Get haplotype matrix----
 
 get_GT_matrix = function(vcf, w = 1, n = 1, threshold = 5){
   
@@ -1453,6 +1498,72 @@ setMethod("mean_ObsHet", signature(obj = "rGenome"),
   
 )
 
+
+
+# get_gene_description ----
+
+get_gene_description = function(obj = NULL, gff = 'genes.gff'){
+            
+            data = obj@loci_table
+            data$POS_end = data$POS + nchar(data$REF) - 1
+            
+            ref_gff = ape::read.gff(gff)
+            coding_regions = ref_gff[grepl('gene', ref_gff$type)&
+                                       !grepl('^Transfer',ref_gff$seqid),
+                                     c('seqid', 'start', 'end', 'attributes')]
+            
+            coding_regions$gene_id = gsub('ID=','',str_extract(coding_regions$attributes, 'ID=(PVP01|PF3D7)_([0-9]+|MIT[0-9]+|API[0-9]+)'))
+            
+            coding_regions$gene_description = gsub('description=','',str_extract(coding_regions$attributes, '(description=.+$|description=.+;)'))
+            
+            coding_regions = coding_regions[order(coding_regions$start),]
+            coding_regions = coding_regions[order(coding_regions$seqid),]
+            rownames(coding_regions) = 1:nrow(coding_regions)
+            
+            
+            data$gene_id = NA
+            data$gene_description = NA
+            
+            
+            for(gene in 1:nrow(coding_regions)){
+              
+              if(nrow(data[data$CHROM == coding_regions[gene, ][['seqid']]&
+                           data$POS >= coding_regions[gene, ][['start']]&
+                           data$POS <= coding_regions[gene, ][['end']],]) != 0){
+                
+                data[data$CHROM == coding_regions[gene, ][['seqid']]&
+                       data$POS >= coding_regions[gene, ][['start']]&
+                       data$POS <= coding_regions[gene, ][['end']],][['gene_id']] = coding_regions[gene, ][['gene_id']]
+                
+                data[data$CHROM == coding_regions[gene, ][['seqid']]&
+                       data$POS >= coding_regions[gene, ][['start']]&
+                       data$POS <= coding_regions[gene, ][['end']],][['gene_description']] = coding_regions[gene, ][['gene_description']]
+              }
+              
+            }
+            
+            # indels that start out of the gene region but end 
+            
+            for(pos in rownames(data[is.na(data$gene_id), ])){
+              
+              if(nrow(coding_regions[coding_regions[['seqid']] == data[pos,][['CHROM']] &
+                                     coding_regions[['start']] <= data[pos,][['POS_end']] &
+                                     coding_regions[['end']] >= data[pos,][['POS_end']],]) != 0){
+                data[pos,][['gene_id']] = coding_regions[coding_regions[['seqid']] == data[pos,][['CHROM']] &
+                                                           coding_regions[['start']] <= data[pos,][['POS_end']] &
+                                                           coding_regions[['end']] >= data[pos,][['POS_end']],][['gene_id']]
+                
+                data[pos,][['gene_description']] = coding_regions[coding_regions[['seqid']] == data[pos,][['CHROM']] &
+                                                                    coding_regions[['start']] <= data[pos,][['POS_end']] &
+                                                                    coding_regions[['end']] >= data[pos,][['POS_end']],][['gene_description']]
+              }
+              
+            }
+            
+            return(data[, c('gene_id', 'gene_description')])
+          }
+          
+
 # Polymorphims density per target----
 
 setGeneric("SNP_density", function(obj = NULL, gff = 'genes.gff') standardGeneric("SNP_density"))
@@ -1496,103 +1607,154 @@ setMethod("SNP_density", signature(obj = "rGenome"),
           }
 )
 
-# get_allReaddepth----
+# Summarise_ReadDepth----
 
-get_allReaddepth = function(vcf, w = 1, n = 100){
+Summarise_ReadDepth = function(obj, by = NULL, w = 1, n = 100){
   
-  s = round(seq(1,nrow(vcf)+1, length.out=n+1))
+  s = round(seq(1,nrow(obj@gt)+1, length.out=n+1))
   low = s[w]
   high = s[w+1]-1
   
-  w_gt_table = vcf[low:high,-1:-8]
+  metadata = obj@metadata
   
-  allele_depth = NULL
-  
-  test = gsub('', '', w_gt_table)
-  
-  for(variant in 1:nrow(w_gt_table)) {
-    gt_pos = grep('GT',strsplit(w_gt_table[variant,1], ':')[[1]])
-    ad_pos = grep('AD',strsplit(w_gt_table[variant,1], ':')[[1]])
-    temp_gts = w_gt_table[variant,-1]
+  if(!is.null(by)){
     
-    for(sample in 1:length(temp_gts)){
-      gt = strsplit(strsplit(as.character(temp_gts[sample]),':')[[1]][gt_pos], '/')[[1]]
-      ad = strsplit(strsplit(as.character(temp_gts[sample]),':')[[1]][ad_pos], ',')[[1]]
+    populations = t(table(metadata[[by]]))
+    populations = data.frame(population = colnames(populations), nsamples = populations[1,])
+    
+    ReadDepth_Summ = NULL
+    
+    # For each subpopulation
+    
+    for(pop in populations$population){
       
-      gt = unique(gt)
+      samples = metadata[metadata[[by]] == pop & !is.na(metadata[[by]]),][['Sample_id']]
+      temp_pop = filter_samples(obj = obj, v = samples)
       
-      if(gt[1] == '.'){
-        ad_df = data.frame(vcf_pos = variant + low - 1,
-                           sample = names(temp_gts)[sample],
-                           allele = NA,
-                           allele_depth = NA,
-                           ap_to_major = NA,
-                           typeof_gt = NA,
-                           typeof_all = NA)
+      ad = gsub('\\d+:', '', as.matrix(temp_pop@gt[low:high,]))
+      
+      ad1 = matrix(as.integer(gsub('/\\d+','',ad)), nrow = nrow(ad), ncol = ncol(ad))
+      ad2 = matrix(as.integer(gsub('^\\d+|^\\d+/','',ad)), nrow = nrow(ad), ncol = ncol(ad))
+      
+      ad3 = matrix(rowSums(cbind(c(ad1),c(ad2)), na.rm = T), nrow = nrow(ad), ncol = ncol(ad))
+      
+      temp_ReadDepth_Summ = data.frame(Total_ReadDepth = rowSums(ad3, na.rm = T),
+                                       mean_ReadDepth = apply(ad3, 1, function(x){mean(x, na.rm = T)})#,
+                                       #sd_ReadDepth = apply(ad3, 1, function(x){sd(x, na.rm = T)}),
+                                       #median_ReadDepth = apply(ad3, 1, function(x){median(x, na.rm = T)}),
+                                       #quantile25_ReadDepth = apply(ad3, 1, function(x){quantile(x, probs = .25, na.rm = T)}),
+                                       #quantile75_ReadDepth = apply(ad3, 1, function(x){quantile(x, probs = .75, na.rm = T)}),
+                                       #iqr_ReadDepth = apply(ad3, 1, function(x){IQR(x, na.rm = T)})
+                                       )
+      
+      names(temp_ReadDepth_Summ) = paste(names(temp_ReadDepth_Summ), pop, sep = "_")
+      
+      if(is.null(ReadDepth_Summ)){
+        ReadDepth_Summ = temp_ReadDepth_Summ
       }else{
-        
-        ad_df = data.frame(vcf_pos = variant + low - 1,
-                           sample = names(temp_gts)[sample],
-                           allele = as.character(0:(length(ad)-1)),
-                           allele_depth = as.numeric(ad))
-        
-        ad_df = ad_df[ad_df$allele_depth != 0,]
-        
-        if(nrow(ad_df) == 0){
-          
-          ad_df = data.frame(vcf_pos = variant + low - 1,
-                             sample = names(temp_gts)[sample],
-                             allele = 'uninformative alleles',
-                             allele_depth = 0,
-                             ap_to_major = NA,
-                             typeof_gt = NA,
-                             typeof_all = NA)
-          
-        }else{
-          
-          ad_df = ad_df[order(ad_df$allele_depth, decreasing = T),]
-          
-          ad_df$ap_to_major = ad_df$allele_depth/max(ad_df$allele_depth)
-          
-          ad_df$typeof_gt = ifelse(length(gt) == 1, 'Homozygous', 'Heterozygous')
-          
-          ad_df$typeof_all = NA
-          
-          if(length(gt) == 1){
-            
-            ad_df[1, ][['typeof_all']] = 'Homozygous'
-            
-            if(nrow(ad_df[-1,]) > 0 ){
-              
-              ad_df[-1,][['typeof_all']] = 'Excluded minor allele'
-              
-            }
-            
-          }else if(length(gt) == 2){
-            
-            ad_df[1, ][['typeof_all']] = 'Major allele'
-            ad_df[2, ][['typeof_all']] = 'Minor allele'
-            
-            if(nrow(ad_df[-1:-2,]) > 0 ){
-              
-              ad_df[-1:-2,][['typeof_all']] = 'Excluded minor allele'
-              
-            }
-          }
-          
-        }
-        
+        ReadDepth_Summ = cbind(ReadDepth_Summ, temp_ReadDepth_Summ)
       }
-    
-      allele_depth = rbind(allele_depth, ad_df)
       
-      }
+    }
+    
+    # For the total population
+
+    ad = gsub('\\d+:', '', as.matrix(obj@gt[low:high,]))
+    
+    ad1 = matrix(as.integer(gsub('/\\d+','',ad)), nrow = nrow(ad), ncol = ncol(ad))
+    ad2 = matrix(as.integer(gsub('^\\d+|^\\d+/','',ad)), nrow = nrow(ad), ncol = ncol(ad))
+    
+    ad3 = matrix(rowSums(cbind(c(ad1),c(ad2)), na.rm = T), nrow = nrow(ad), ncol = ncol(ad))
+    
+    temp_ReadDepth_Summ = data.frame(Total_ReadDepth = rowSums(ad3, na.rm = T),
+                                     mean_ReadDepth = apply(ad3, 1, function(x){mean(x, na.rm = T)})#,
+                                     #sd_ReadDepth = apply(ad3, 1, function(x){sd(x, na.rm = T)}),
+                                     #median_ReadDepth = apply(ad3, 1, function(x){median(x, na.rm = T)}),
+                                     #quantile25_ReadDepth = apply(ad3, 1, function(x){quantile(x, probs = .25, na.rm = T)}),
+                                     #quantile75_ReadDepth = apply(ad3, 1, function(x){quantile(x, probs = .75, na.rm = T)}),
+                                     #iqr_ReadDepth = apply(ad3, 1, function(x){IQR(x, na.rm = T)})
+                                     )
+    
+    names(temp_ReadDepth_Summ) = paste(names(temp_ReadDepth_Summ), 'Total', sep = "_")
+    
+    ReadDepth_Summ = cbind(ReadDepth_Summ, temp_ReadDepth_Summ)
+    rownames(ReadDepth_Summ) = rownames(ad)
+    
+  }else{
+    
+    ad = gsub('\\d+:', '', as.matrix(obj@gt[low:high,]))
+    
+    ad1 = matrix(as.integer(gsub('/\\d+','',ad)), nrow = nrow(ad), ncol = ncol(ad))
+    ad2 = matrix(as.integer(gsub('^\\d+|^\\d+/','',ad)), nrow = nrow(ad), ncol = ncol(ad))
+    
+    ad3 = matrix(rowSums(cbind(c(ad1),c(ad2)), na.rm = T), nrow = nrow(ad), ncol = ncol(ad))
+    
+    ReadDepth_Summ = data.frame(Total_ReadDepth = rowSums(ad3, na.rm = T),
+                                mean_ReadDepth = apply(ad3, 1, function(x){mean(x, na.rm = T)})#,
+                                #sd_ReadDepth = apply(ad3, 1, function(x){sd(x, na.rm = T)}),
+                                #median_ReadDepth = apply(ad3, 1, function(x){median(x, na.rm = T)}),
+                                #quantile25_ReadDepth = apply(ad3, 1, function(x){quantile(x, probs = .25, na.rm = T)}),
+                                #quantile75_ReadDepth = apply(ad3, 1, function(x){quantile(x, probs = .75, na.rm = T)}),
+                                #iqr_ReadDepth = apply(ad3, 1, function(x){IQR(x, na.rm = T)})
+                                )
+    
+    rownames(ReadDepth_Summ) = rownames(ad)
+
   }
   
-  return(allele_depth)
+  return(ReadDepth_Summ)
   
 }
 
+# prune_alleles----
+
+prune_alleles = function(obj, threshold = 4, n = 100){
+  library(svMisc)
+  s = round(seq(1,nrow(obj@gt)+1, length.out=n+1))
+  gt6 = NULL
+  
+  for(w in 1:n){
+    low = s[w]
+    high = s[w+1]-1
+  
+    gt = gsub(':\\d+', '', as.matrix(obj@gt[low:high,]))
+    gt1 = matrix(as.integer(gsub('/\\d+','',gt)), nrow = nrow(gt), ncol = ncol(gt))
+    gt2 = matrix(as.integer(gsub('^\\d+|^\\d+/','',gt)), nrow = nrow(gt), ncol = ncol(gt))
+  
+    ad = gsub('\\d+:', '', as.matrix(obj@gt[low:high,]))
+
+    ad1 = matrix(as.integer(gsub('/\\d+','',ad)), nrow = nrow(ad), ncol = ncol(ad))
+    ad2 = matrix(as.integer(gsub('^\\d+|^\\d+/','',ad)), nrow = nrow(ad), ncol = ncol(ad))
+  
+    # prune alleles
+    gt1[ad1 <= threshold] = NA
+    ad1[ad1 <= threshold] = NA
+  
+    gt2[ad2 <= threshold] = NA
+    ad2[ad2 <= threshold] = NA
+  
+    gt3 = matrix(paste(gt1, ad1, sep = ':'), nrow = nrow(gt), ncol = ncol(gt))
+    gt3[gt3 == 'NA:NA'] = NA
+  
+    gt4 = matrix(paste(gt2, ad2, sep = ':'), nrow = nrow(gt), ncol = ncol(gt))
+    gt4[gt4 == 'NA:NA'] = NA
+  
+    gt5 = matrix(paste(gt3, gt4, sep = '/'), nrow = nrow(gt), ncol = ncol(gt))
+    gt5[gt5 == 'NA/NA'] = NA
+    gt5 = gsub('/NA', '', gt5)
+  
+    colnames(gt5) = colnames(gt)
+    rownames(gt5) = rownames(gt)
+    
+    gt6 = rbind(gt6, gt5)
+    
+    progress(round(100*w/n))
+    
+  }
+  
+  return(gt6)
+  
+  }
 
 # Fws----
 
@@ -1766,7 +1928,7 @@ get_genclone = function(gt,
 
 # filter_gt_matrix ----
 
-filter_gt_matrix = function(gt, # genotype matrix
+filter_gt_matrix = function(gt, # haplotype matrix
                             loci, # table with loci information
                             filter_table, # Table of filtered segments or positions
                             by = 'segments',
@@ -1893,7 +2055,7 @@ fastGRM = function(obj, k, monoclonals = NULL, polyclonals = NULL, Pop = NULL, q
   evector = fastGRMCpp(X, k, q)
   
   #### Add metadata to the PCA----
-  Pop_col = merge(data.frame(Sample_id = colnames(X),
+  Pop_col = merge(data.frame(Sample_id = gsub('_C[1,2]$','',colnames(X)),
                              order = 1:ncol(X)), metadata[,c('Sample_id', Pop)], by = 'Sample_id', all.x = T)
   
   Pop_col = Pop_col[order(Pop_col$order),]
@@ -1905,110 +2067,282 @@ fastGRM = function(obj, k, monoclonals = NULL, polyclonals = NULL, Pop = NULL, q
   
 }
 
-
-
-
 # merge_rGenome----
 
-# Locus_info_temp1 = data.frame(locus_id = rownames(Locus_info), Locus_info)
-# names(Locus_info_temp1) = c('locus_id',paste0(names(Locus_info_temp1)[-1], '.temp1'))
-# 
-# Locus_info_temp2 = data.frame(locis_id = rownames(Locus_info_Pv4), Locus_info_Pv4)
-# names(Locus_info_temp2) = c('locus_id',paste0(names(Locus_info_temp2)[-1], '.temp2'))
-# 
-# gt_temp1 = genotypes_AD
-# gt_temp2 = genotypes_AD_Pv4
-# 
-# Locus_info_merged = merge(Locus_info_temp1, Locus_info_temp2, by = 'locus_id', all = T)
-# 
-# 
-# Locus_info_merged$ALT = sapply(1:nrow(Locus_info_merged), function(pos){
-#   ALT = unique(c(unlist(str_split(gsub(':\\d+','',Locus_info_merged[pos,][['Alleles.temp1']]), ',', simplify = T)),
-#            unlist(str_split(gsub(':\\d+','',Locus_info_merged[pos,][['Alleles.temp2']]), ',', simplify = T))))
-#   
-#   ALT = ALT[!is.na(ALT) & ALT != Locus_info_merged[pos,][['REF.temp1']]]
-# 
-#   
-#   paste(ALT, collapse = ',')
-#   
-# }, simplify = T)
-# 
-# Locus_info_merged$Alleles = sapply(1:nrow(Locus_info_merged), function(pos){
-#   paste(paste(c(Locus_info_merged[pos,][['REF.temp1']],
-#                 str_split(Locus_info_merged[pos,][['ALT']], ',', simplify = T)) ,
-#               0:(length(c(Locus_info_merged[pos,][['REF.temp1']],
-#                          str_split(Locus_info_merged[pos,][['ALT']], ',', simplify = T))) - 1), sep = ':'), collapse = ',')
-# })
-# 
-# View(Locus_info_merged[, c("Alleles.temp1", "Alleles.temp2", "Alleles")])
-# 
-# for(locus_id in Locus_info_merged$locus_id){
-#   
-#   if(!is.na(Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['Alleles.temp2']])){
-#    
-#     if(Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['Alleles.temp1']] != Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['Alleles.temp2']]){
-#       
-#       Alleles = Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['Alleles']]
-#       Alleles = data.frame(Alleles = t(gsub(':\\d+','',str_split(Alleles, ',', simplify = T))),
-#                            Codes = t(gsub('([A-Z]+|\\*):','',str_split(Alleles, ',', simplify = T))))
-#       
-#       if(locus_id %in% rownames(gt_temp1)){
-#         Alleles.temp1 = Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['Alleles.temp1']]
-#         Alleles.temp1 = data.frame(Alleles = t(gsub(':\\d+','',str_split(Alleles.temp1, ',', simplify = T))),
-#                                    Codes = t(gsub('([A-Z]+|\\*):','',str_split(Alleles.temp1, ',', simplify = T))))
-#         
-#         Alleles.temp1 = Alleles.temp1[order(Alleles.temp1$Codes, decreasing = T),]
-#         rownames(Alleles.temp1) = 1:nrow(Alleles.temp1)
-#         
-#         for(allele in Alleles.temp1$Alleles){
-#           if(Alleles.temp1[Alleles.temp1$Alleles == allele, ][['Codes']] != Alleles[Alleles$Alleles == allele, ][['Codes']]){
-#             
-#             gt_temp1[locus_id,] = gsub(paste0('^',Alleles.temp1[Alleles.temp1$Alleles == allele, ][['Codes']],':'),
-#                                        paste0(Alleles[Alleles$Alleles == allele, ][['Codes']],':')
-#                                        , gt_temp1[locus_id,])
-#             
-#             gt_temp1[locus_id,] = gsub(paste0('/',Alleles.temp1[Alleles.temp1$Alleles == allele, ][['Codes']],':'),
-#                                        paste0('/',Alleles[Alleles$Alleles == allele, ][['Codes']],':')
-#                                        , gt_temp1[locus_id,])
-#           }
-#         }
-#         
-#       }
-#       
-#       if(locus_id %in% rownames(gt_temp2)){
-#         Alleles.temp2 = Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['Alleles.temp2']]
-#         Alleles.temp2 = data.frame(Alleles = t(gsub(':\\d+','',str_split(Alleles.temp2, ',', simplify = T))),
-#                                    Codes = t(gsub('([A-Z]+|\\*):','',str_split(Alleles.temp2, ',', simplify = T))))
-#         
-#         Alleles.temp2 = Alleles.temp2[order(Alleles.temp2$Codes, decreasing = T),]
-#         rownames(Alleles.temp2) = 1:nrow(Alleles.temp2)
-#         
-#         for(allele in Alleles.temp2$Alleles){
-#           if(Alleles.temp2[Alleles.temp2$Alleles == allele, ][['Codes']] != Alleles[Alleles$Alleles == allele, ][['Codes']]){
-#             
-#             gt_temp2[locus_id,] = gsub(paste0('^',Alleles.temp2[Alleles.temp2$Alleles == allele, ][['Codes']],':'),
-#                                        paste0(Alleles[Alleles$Alleles == allele, ][['Codes']],':')
-#                                        , gt_temp2[locus_id,])
-#             
-#             gt_temp2[locus_id,] = gsub(paste0('/',Alleles.temp2[Alleles.temp2$Alleles == allele, ][['Codes']],':'),
-#                                        paste0('/',Alleles[Alleles$Alleles == allele, ][['Codes']],':')
-#                                        , gt_temp2[locus_id,])
-#             
-#           }
-#         }
-#       }
-#     }
-#   }
-# }
-# 
-# 
-# vcf[vcf$CHROM == Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['CHROM.temp1']]&
-#       vcf$POS == Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['POS.temp1']], 1:8]
-# 
-# vcf_Pv4[vcf_Pv4$CHROM == Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['CHROM.temp1']]&
-#       vcf_Pv4$POS == Locus_info_merged[Locus_info_merged$locus_id == locus_id,][['POS.temp1']], 1:8]
-# 
-
+merge_rGenome = function(obj1 = NULL, obj2 = NULL){
+  
+  # Check if the column Alleles is not present in the first data set
+  if(sum(grepl('Alleles', names(obj1@loci_table))) == 0){ # if not generate Alleles and Allele_Counts
+    # count Alleles
+    Locus_info_temp1 = get_AC(obj1, update_alleles = T)
+    Locus_info_temp1 = cbind(obj1@loci_table, Locus_info_temp1)
+  }else{
+    Locus_info_temp1 = obj1@loci_table[, c('CHROM',
+                                           'POS',
+                                           'REF', 
+                                           'ALT',
+                                           'Alleles',
+                                           'Allele_Counts')]
+  }
+  
+  # Check if the column Alleles is not present in the second data set
+  if(sum(grepl('Alleles', names(obj2@loci_table))) == 0){ # if not generate Alleles and Allele_Counts
+    # count Alleles
+    Locus_info_temp2 = get_AC(obj2, update_alleles = T)
+    Locus_info_temp2 = cbind(obj2@loci_table, Locus_info_temp2)
+  }else{
+    Locus_info_temp2 = obj2@loci_table[, c('CHROM',
+                                           'POS',
+                                           'REF', 
+                                           'ALT',
+                                           'Alleles',
+                                           'Allele_Counts')]
+  }
+  
+  # Relabel columns of the first data set
+  
+  Locus_info_temp1 = data.frame(locus_id = rownames(Locus_info_temp1), Locus_info_temp1)
+  names(Locus_info_temp1) = c('locus_id',paste0(names(Locus_info_temp1)[-1], '.temp1'))
+  
+  # Relabel columns of the second data set
+  Locus_info_temp2 = data.frame(locis_id = rownames(Locus_info_temp2), Locus_info_temp2)
+  names(Locus_info_temp2) = c('locus_id',paste0(names(Locus_info_temp2)[-1], '.temp2'))
+  
+  
+  # Store the genotype tables of both data sets
+  gt_temp1 = obj1@gt
+  gt_temp2 = obj2@gt
+  
+  # Merge the loci_table of both data sets
+  Locus_info_merged = merge(Locus_info_temp1, Locus_info_temp2, by = 'locus_id', all = T)
+  
+  # Check if the reference allele is the same for both data sets in each position
+  Locus_info_merged %<>% mutate(
+    REF = case_when(
+      REF.temp1 == REF.temp2 ~ REF.temp1,
+      !is.na(REF.temp1) & is.na(REF.temp2) ~ REF.temp1,
+      is.na(REF.temp1) & !is.na(REF.temp2) ~ REF.temp2,
+      REF.temp1 != REF.temp2 ~ 'ERROR'
+    )
+  )
+  
+  # Check if the alternative alleles  and their labels are the same for both data sets in each position
+  Locus_info_merged$Alleles = apply(Locus_info_merged, 1, function(pos){
+    if(!is.na(pos['Alleles.temp1'])&is.na(pos['Alleles.temp2'])){ # If the second data set is all missing data
+      paste0(pos['Alleles.temp1'], ';Only First data set') 
+    }else if(is.na(pos['Alleles.temp1'])&!is.na(pos['Alleles.temp2'])){ # If the first data set is all missing data
+      paste0(pos['Alleles.temp2'], ';Only Second data set') 
+    }else if(is.na(pos['Alleles.temp1'])&is.na(pos['Alleles.temp2'])){ # If the first and second data sets are all missing data
+      NA
+    }else if(pos['Alleles.temp1'] == pos['Alleles.temp2']){ # If the alternative alleles  and their labels are the same for both data sets
+      pos['Alleles.temp1']
+    }else if(sum(!(unlist(str_split(pos['Alleles.temp2'], ',', simplify = T)) %in% unlist(str_split(pos['Alleles.temp1'], ',', simplify = T)))) == 0){ # If the alternative alleles  and their labels of second data set are contained in the first data set
+      pos['Alleles.temp1']
+    }else if(sum(!(unlist(str_split(pos['Alleles.temp1'], ',', simplify = T)) %in% unlist(str_split(pos['Alleles.temp2'], ',', simplify = T)))) == 0){ # If the alternative alleles  and their labels of first data set are contained in the second data set
+      pos['Alleles.temp2']
+    }else{'ERROR'} # If at least one alternative allele  and its label does not coincide between both data sets
+  })
+  
+  # Split the loci table between:
+  
+  ## loci which reference alleles do not coincide between data sets
+  Locus_info_merged_w_REFdiscrepancies = Locus_info_merged %>% filter(REF == 'ERROR')
+  
+  ## loci which reference alleles coincide but the aleternative alleles do not coincide between data sets
+  Locus_info_merged_w_ALTdiscrepancies = Locus_info_merged %>% filter(Alleles == 'ERROR', REF != 'ERROR')
+  
+  ## loci which reference and alternative alleles coincide between data sets and do not have missing data
+  Locus_info_merged_good = Locus_info_merged %>% filter(Alleles != 'ERROR' & REF != 'ERROR' & !grepl('Only',Alleles))
+  
+  ## loci with no amplification in one data set
+  Locus_info_merged_w_missing = Locus_info_merged %>% filter(grepl('Only',Alleles) & REF != 'ERROR')
+  
+  # Add row names for each splited set of loci
+  rownames(Locus_info_merged_w_REFdiscrepancies) = Locus_info_merged_w_REFdiscrepancies$locus_id
+  rownames(Locus_info_merged_w_ALTdiscrepancies) = Locus_info_merged_w_ALTdiscrepancies$locus_id
+  rownames(Locus_info_merged_good) = Locus_info_merged_good$locus_id
+  rownames(Locus_info_merged_w_missing) = Locus_info_merged_w_missing$locus_id
+  
+  # Relabel each position in the set of loci that reference alleles coincide but the aleternative alleles do not coincide between data sets
+  for(pos in rownames(Locus_info_merged_w_ALTdiscrepancies)){
+    
+    # Get Alleles, allele labels, and allele counts for the first data set
+    Alleles.temp1 = as.character(unlist(str_split(gsub(':\\d+','',Locus_info_merged_w_ALTdiscrepancies[pos,][['Alleles.temp1']]), ',', simplify = T)))
+    Allele_labels.temp1 = unlist(str_split(gsub('([ATGC]+|\\*):','',Locus_info_merged_w_ALTdiscrepancies[pos,][['Alleles.temp1']]), ',', simplify = T))
+    Allele_counts.temp1 = as.integer(unlist(str_split(gsub('\\d+:','',Locus_info_merged_w_ALTdiscrepancies[pos,][['Allele_Counts.temp1']]), ',', simplify = T)))
+    names(Alleles.temp1) = Allele_labels.temp1
+    names(Allele_counts.temp1) = Allele_labels.temp1
+    
+    # Get Alleles, allele labels, and allele counts for the first data set
+    Alleles.temp2 = as.character(unlist(str_split(gsub(':\\d+','',Locus_info_merged_w_ALTdiscrepancies[pos,][['Alleles.temp2']]), ',', simplify = T)))
+    Allele_labels.temp2 = unlist(str_split(gsub('([ATGC]+|\\*):','',Locus_info_merged_w_ALTdiscrepancies[pos,][['Alleles.temp2']]), ',', simplify = T))
+    Allele_counts.temp2 = as.integer(unlist(str_split(gsub('\\d+:','',Locus_info_merged_w_ALTdiscrepancies[pos,][['Allele_Counts.temp2']]), ',', simplify = T)))
+    names(Alleles.temp2) = Allele_labels.temp2
+    names(Allele_counts.temp2) = Allele_labels.temp2
+    
+    # Get the reference and unique alternative alleles observed in both data sets
+    REF.Allele = unique(c(Alleles.temp1[names(Alleles.temp1)[names(Alleles.temp1) == '0']], Alleles.temp2[names(Alleles.temp2)[names(Alleles.temp2) == '0']]))
+    ALT.Alleles = unique(c(Alleles.temp1[names(Alleles.temp1)[names(Alleles.temp1) != '0']], Alleles.temp2[names(Alleles.temp2)[names(Alleles.temp2) != '0']]))
+    
+    # If reference allele is not present in either set
+    if(length(REF.Allele) == 0){
+      REF.Allele = Locus_info_merged_w_ALTdiscrepancies[pos,][['REF']]
+    }
+    
+    # Calculate the total number of samples that have each ealternative allele in both data sets
+    ALT.Allele_counts = NULL
+    
+    for(allele in ALT.Alleles){ # For each alternative allele
+      
+      ALT.Allele_counts = c(ALT.Allele_counts,
+                            
+                            if(allele %in% Alleles.temp1 & allele %in% Alleles.temp2){ # if the allele is present in both data sets
+                              Allele_counts.temp1[names(Alleles.temp1[Alleles.temp1 == allele])] +  
+                                Allele_counts.temp2[names(Alleles.temp2[Alleles.temp2 == allele])]
+                            }else if(allele %in% Alleles.temp1 & !(allele %in% Alleles.temp2)){ # if allele is present only in the first data set
+                              Allele_counts.temp1[names(Alleles.temp1[Alleles.temp1 == allele])]
+                            }else if(!(allele %in% Alleles.temp1) & allele %in% Alleles.temp2){ # if allele is present only in the second data set
+                              Allele_counts.temp2[names(Alleles.temp2[Alleles.temp2 == allele])]
+                            }
+      )
+    }
+    
+    # name (index) the allele count with the allele
+    names(ALT.Allele_counts) = ALT.Alleles
+    
+    # sort the alternative alleles based on their allele count
+    ALT.Allele_counts = sort(ALT.Allele_counts, decreasing = T)
+    
+    # Calculate the total number of samples that have the reference allele in both data sets
+    REF.Allele_count = if(REF.Allele %in% Alleles.temp1 & REF.Allele %in% Alleles.temp2){ # if the allele is present in both data sets
+      Allele_counts.temp1[names(Alleles.temp1[Alleles.temp1 == REF.Allele])] +  
+        Allele_counts.temp2[names(Alleles.temp2[Alleles.temp2 == REF.Allele])]
+    }else if(REF.Allele %in% Alleles.temp1 & !(REF.Allele %in% Alleles.temp2)){ # if allele is present only in the first data set
+      Allele_counts.temp1[names(Alleles.temp1[Alleles.temp1 == REF.Allele])]
+    }else if(!(REF.Allele %in% Alleles.temp1) & REF.Allele %in% Alleles.temp2){ # if allele is present only in the second data set
+      Allele_counts.temp2[names(Alleles.temp2[Alleles.temp2 == REF.Allele])]
+    }
+    
+    if(!is.null(REF.Allele_count)){
+      
+      # name (index) the allele count with the allele
+      names(REF.Allele_count) = REF.Allele
+      # Combine the reference and the alternative alleles in one object
+      Allele_counts = c(REF.Allele_count, ALT.Allele_counts)
+      Alleles = names(Allele_counts)
+      
+    }else{
+      
+      Allele_counts = ALT.Allele_counts
+      Alleles = names(Allele_counts)
+      
+    }
+    
+    # RELABEL the alleles for the combined data set
+    
+    if(!is.null(REF.Allele_count)){
+      Allele_labels = as.character(0:(length(Alleles) - 1))
+      names(Alleles) = Allele_labels
+    }else{
+      
+      Allele_labels = as.character(1:length(Alleles))
+      names(Alleles) = Allele_labels
+    }
+    
+    # If the alternative alleles  and their labels of First data set are NOT contained in the merged data set
+    if(sum(!(paste(Alleles.temp1, Allele_labels.temp1, sep = ':') %in% paste(Alleles, Allele_labels, sep = ':'))) != 0){
+      
+      # Identify and select the alleles which lables have changed
+      Changed.Alleles.temp1 = Alleles.temp1[!(paste(Alleles.temp1, Allele_labels.temp1, sep = ':') %in% paste(Alleles, Allele_labels, sep = ':'))]
+      
+      # Identify the new labels of the alleles
+      Relabeled.Alleles.temp1 = Alleles[Alleles %in% Changed.Alleles.temp1]
+      
+      # For each changed label, modify the label in the genotype table
+      for(clabel in names(Changed.Alleles.temp1)){
+        
+        rlabel = names(Relabeled.Alleles.temp1[Relabeled.Alleles.temp1 == Changed.Alleles.temp1[clabel]])
+        
+        gt_temp1[pos,] = gsub(paste0(clabel,':'), paste0(rlabel,'R:'), gt_temp1[pos,]) # The R: denotes that that label is been modify and avoids overwriting
+        
+      }
+      
+      # Once screening of all alleles is been completed, delete the R: identifier
+      gt_temp1[pos,] = gsub('R:', ':', gt_temp1[pos,])
+      
+    }
+    
+    # If the alternative alleles  and their labels of Second data set are NOT contained in the merged data set
+    if(sum(!(paste(Alleles.temp2, Allele_labels.temp2, sep = ':') %in% paste(Alleles, Allele_labels, sep = ':'))) != 0){
+      
+      # Identify and select the alleles which lables have changed
+      Changed.Alleles.temp2 = Alleles.temp2[!(paste(Alleles.temp2, Allele_labels.temp2, sep = ':') %in% paste(Alleles, Allele_labels, sep = ':'))]
+      
+      # Identify the new labels of the alleles
+      Relabeled.Alleles.temp2 = Alleles[Alleles %in% Changed.Alleles.temp2]
+      
+      # For each changed label, modify the label in the genotype table
+      for(clabel in names(Changed.Alleles.temp2)){
+        
+        rlabel = names(Relabeled.Alleles.temp2[Relabeled.Alleles.temp2 == Changed.Alleles.temp2[clabel]])
+        
+        gt_temp2[pos,] = gsub(paste0(clabel,':'), paste0(rlabel,'R:'), gt_temp2[pos,]) # The R: denotes that that label is been modify and avoids overwriting
+        
+      }
+      
+      # Once screening of all alleles is been completed, delete the R: identifier
+      gt_temp2[pos,] = gsub('R:', ':', gt_temp2[pos,])
+      
+    }
+    
+    # Update Alleles in the Locus_info_merged_w_ALTdiscrepancies data.frame
+    Locus_info_merged_w_ALTdiscrepancies[pos,][['Alleles']] = paste(paste(Alleles, Allele_labels,sep = ':'), collapse = ',')
+    
+  }
+  
+  # Filter positions that were able to merge
+  Locus_info_merged_final = rbind(Locus_info_merged_good, Locus_info_merged_w_ALTdiscrepancies)
+  
+  # Update Alternative Alleles (ALT)
+  Locus_info_merged_final$ALT  = apply(Locus_info_merged_final, 1, function(ALT){
+    gsub(':\\d+', '', gsub(paste0('^',paste(ALT['REF'], '0', sep = ':'), ','), '', ALT['Alleles']))
+  })
+  
+  # Sort positions by position and chromosome
+  Locus_info_merged_final = Locus_info_merged_final[order(Locus_info_merged_final$POS.temp1),]
+  Locus_info_merged_final = Locus_info_merged_final[order(Locus_info_merged_final$CHROM.temp1),]
+  
+  # Select columns that will be returned
+  Locus_info_merged_final = Locus_info_merged_final[,c('CHROM.temp1',
+                                                       'POS.temp1',
+                                                       'REF',
+                                                       'ALT',
+                                                       'Alleles')]
+  
+  colnames(Locus_info_merged_final) = c('CHROM',
+                                        'POS',
+                                        'REF',
+                                        'ALT',
+                                        'Alleles')
+  
+  # Filter and merge the genotype tables
+  gt_final = cbind(gt_temp1[rownames(Locus_info_merged_final),], gt_temp2[rownames(Locus_info_merged_final),])
+  
+  # Merge the metadata
+  merged_metadata = merge(obj1@metadata, obj2@metadata, by = 'Sample_id', all = T)
+  
+  rownames(merged_metadata) = merged_metadata$Sample_id
+  
+  merged_metadata = merged_metadata[colnames(gt_final),]
+  
+  # Create the merged rGenome object
+  merged_rGenome = rGenome(gt = gt_final,
+                           loci_table = Locus_info_merged_final,
+                           metadata = merged_metadata)
+  
+  return(merged_rGenome)
+  
+}
 
 # filter_loci_table----
 
@@ -2327,5 +2661,243 @@ find_DNAsequence = function(sequences = NULL,
   
 }
 
+# get_haplotypes_respect_to_reference----
 
+get_haplotypes_respect_to_reference = function(obj,
+                                               gene_ids = NULL,
+                                               gene_labels = NULL,
+                                               gff_file = NULL,
+                                               fasta_file = NULL,
+                                               monoclonals = NULL,
+                                               polyclonals = NULL,
+                                               variables = NULL){
+  library(ape)
+  library(Biostrings)
+  library(msa)
+  
+  # Call reference genome and its corresponding anotation in the gff file
+  reference_gff = read.gff(gff_file)
+  reference_genome = readDNAStringSet(fasta_file)
+  
+  # Get gene ids, names, and descriptions 
+  gene_names = data.frame(gene_id = gsub(';.+$','',gsub('ID=','',reference_gff %>% filter(grepl(paste(gene_ids, collapse = '|'), attributes),  grepl('gene', type)) %>% select(attributes) %>% unlist())),
+                          gene_name = gsub(';.+$','',gsub('^.+Name=','',reference_gff %>% filter(grepl(paste(gene_ids, collapse = '|'), attributes),  grepl('gene', type)) %>% select(attributes) %>% unlist())),
+                          gene_description = gsub(';.+$','',gsub('^.+description=','',reference_gff %>% filter(grepl(paste(gene_ids, collapse = '|'), attributes),  grepl('gene', type)) %>% select(attributes) %>% unlist())))
+  
+  # Split gene coordinates by coding sequences (CDS)
+  genes_gff = reference_gff %>% filter(grepl(paste(gene_ids, collapse = '|'), attributes) & type == 'CDS')
+  
+  # Get gene ids
+  genes_gff %<>% mutate(gene_id = gsub(';.+$|\\..+$','',gsub('^.+gene_id=|^ID=','',attributes)))
+  
+  # Merge CDS coordinates with gene names and descriptions by gene_id
+  genes_gff = merge(genes_gff, gene_names, by = 'gene_id', all.x = T)
+  
+  # For each gene:
+  
+  Sample_id = obj@metadata$Sample_id
+  
+  monoclonals_ids = Sample_id[Sample_id %in% monoclonals]
+  polyclonals_ids = Sample_id[Sample_id %in% polyclonals]
+  
+  haplotypes_ids = c(monoclonals_ids,
+                    paste0(polyclonals_ids, '_C1'),
+                    paste0(polyclonals_ids, '_C2'))
+  
+  haplotypes = matrix(NA, ncol = length(gene_ids), nrow = length(haplotypes_ids),
+                     dimnames = list(haplotypes_ids, gene_ids))
+  
+  for(gene in unique(genes_gff$gene_id)){
+    
+    # Filter polymorphic positions located in the gene of interest (GOI)
+    ## Get the cds coordinates of the goi
+    cds_gff = genes_gff[genes_gff$gene_id == gene,]
+    ## Get the chromosome sequence where the goi is located
+    ref_seq = reference_genome[[grep(unique(cds_gff$seqid), names(reference_genome))]]
+    
+    # Generate a vector with all DNA coordinates in the chromosome
+    dna_regions = NULL
+    gene_seq = NULL
+    
+    for(cds in 1:nrow(cds_gff)){
+      
+      # Get nucleotide coordinates
+      dna_regions = c(dna_regions,
+                      paste(cds_gff[cds,][['seqid']],
+                            cds_gff[cds,][['start']]:cds_gff[cds,][['end']],
+                            sep = '_'))
+      
+      # Get DNA sequence
+      gene_seq = paste0(gene_seq, as.character(subseq(ref_seq, start = cds_gff[cds,][['start']], end = cds_gff[cds,][['end']])))
+      
+    }
+    
+    names(gene_seq) = 'reference'
+    
+    if(sum(rownames(obj@loci_table) %in% dna_regions) > 0){
+      
+      # Filter the rGenome object based on the gene coordinates
+      
+      gene_obj = filter_loci(obj, v = rownames(obj@loci_table) %in% dna_regions)
+      
+      ## Remove read abundance
+      
+      gt = handle_ploidy(gt = gene_obj@gt, monoclonals = monoclonals, polyclonals = polyclonals)
+      #gt = handle_ploidy(gene_obj@gt, monoclonals = NULL, polyclonals = c(monoclonals, polyclonals))
+      
+      # Tarnsform haplotype codes to nucleotides
+      nuc_gt = NULL
+      for(pos in 1:nrow(gt)){
+        temp_nuc_gt = gt[pos,]
+        allele_codes = unique(unlist(strsplit(gt[pos,], '/')))
+        allele_codes = min(as.integer(allele_codes), na.rm = T):max(as.integer(allele_codes), na.rm = T)
+        alleles = unlist(strsplit(gsub(':\\d+','',gene_obj@loci_table[pos,"Alleles"]), ','))
+        for(allele in allele_codes + 1){
+          temp_nuc_gt = gsub(allele_codes[allele],alleles[allele],temp_nuc_gt)
+        }
+        
+        temp_nuc_gt = gsub('\\*', '',temp_nuc_gt)
+        nuc_gt = rbind(nuc_gt, temp_nuc_gt)
+      }
+      rownames(nuc_gt) = rownames(gt)
+      
+      ref_polymorphims_length = nchar(gene_obj@loci_table$REF)
+      
+      # Define the coordinates of the polymorphims in the gene sequence
+      polymorphic_positions = which(dna_regions %in% rownames(nuc_gt))
+      
+      # For each sample for each codon define the aminoacid changes in the gene
+      
+      sample_seqs = NULL
+      
+      for(sample in 1:ncol(nuc_gt)){
+        
+        sample_seq = gene_seq
+        
+        for(pos in 1:length(polymorphic_positions)){
+          
+          substr(sample_seq, polymorphic_positions[pos], polymorphic_positions[pos] + ref_polymorphims_length[pos] - 1) = nuc_gt[pos,sample]
+          
+        }
+        
+        sample_seqs = c(sample_seqs, sample_seq)
+        
+      }
+      
+      names(sample_seqs) = colnames(nuc_gt)
+      
+      sample_seqs = sample_seqs[!is.na(sample_seqs)]
+      
+      if(cds_gff$strand[1] == '+'){
+        
+        aa_seqs = AAStringSet(c(as.character(translate(DNAString(gene_seq))),
+                                as.character(translate(DNAStringSet(sample_seqs)))))
+        
+      }else if(cds_gff$strand[1] == '-'){
+        
+        aa_seqs = AAStringSet(c(as.character(translate(reverseComplement(DNAString(gene_seq)))),
+                                as.character(translate(reverseComplement(DNAStringSet(sample_seqs))))))
+        
+      }
+      
+      names(aa_seqs) = c('reference', names(sample_seqs))
+      
+      aa_alignment = msa(aa_seqs)
+      
+      aa_alignment_matrix = matrix(unlist(strsplit(as.character(aa_alignment@unmasked), '')), ncol = length(aa_alignment@unmasked),
+                                   nrow = nchar(as.character(aa_alignment@unmasked[['reference']])),
+                                   dimnames = list(
+                                     1:nchar(as.character(aa_alignment@unmasked[['reference']])),
+                                     names(aa_alignment@unmasked)
+                                   )
+      )
+      
+      aa_polymorphic_positions = which(rowSums(aa_alignment_matrix[,'reference'] != aa_alignment_matrix) > 0)
+      
+      if(length(aa_polymorphic_positions) > 0){
+        
+        aa_haplotypes = NULL
+        
+        for(sample in names(sample_seqs)){
+          
+          ref_aa_aligned = aa_alignment_matrix[,'reference']
+          
+          samp_aa_aligned = aa_alignment_matrix[,sample]
+          
+          haplotype = paste(paste0(ref_aa_aligned[aa_polymorphic_positions], aa_polymorphic_positions, samp_aa_aligned[aa_polymorphic_positions]), collapse = ' ')
+          
+          names(haplotype) = sample
+          
+          aa_haplotypes = c(aa_haplotypes, haplotype)
+          
+        }
+        
+        haplotypes[rownames(haplotypes) %in% names(aa_haplotypes), gene] = aa_haplotypes
+        
+        
+      }else{
+        
+        haplotypes[rownames(haplotypes) %in% names(sample_seqs), gene] = '.'
+        
+      }
+      
+    }else{
+      
+      haplotypes[, gene] = '.'
+      
+    }
+    
+  }
+  
+  haplo_freqs = data.frame(Sample_id = rownames(haplotypes), haplotypes)
+  
+  metadata = obj@metadata[,c('Sample_id', variables)]
+  colnames(metadata) = c('Sample_id', 'Var1', 'Var2')
+  
+  metadata_monoclonals = metadata[monoclonals,]
+  metadata_polyclonals = metadata[polyclonals,]
+  metadata_polyclonals1 = metadata_polyclonals
+  metadata_polyclonals1$Sample_id = paste0(metadata_polyclonals1$Sample_id, '_C1')
+  metadata_polyclonals2 = metadata_polyclonals
+  metadata_polyclonals2$Sample_id = paste0(metadata_polyclonals2$Sample_id, '_C2')
+  
+  metadata = rbind(metadata_monoclonals, metadata_polyclonals1, metadata_polyclonals2)
+  
+  haplo_freqs = merge(haplo_freqs, metadata, by = 'Sample_id')
+  
+  haplo_freqs %<>% pivot_longer(cols = colnames(haplotypes), names_to = 'Gene_id', values_to = 'Haplotype')
+  
+  gene_labels = data.frame(gene_ids, gene_labels)
+  
+  haplo_freqs$gene_label = NA
+  
+  for(gene in gene_labels$gene_ids){
+    
+    haplo_freqs[haplo_freqs$Gene_id == gene,][['gene_label']] = gene_labels[gene_labels$gene_ids == gene,][['gene_labels']]
+    
+  }
+  
+  haplo_freqs %<>% 
+    mutate(Haplotype = paste(gene_label, Haplotype, sep = ':'))%>%
+    group_by(Var1, Var2, gene_label) %>%
+    summarise(Sample_id = Sample_id,
+              Haplotype = Haplotype,
+              Sample_size = n()
+              ) %>% group_by(Var1, Var2, gene_label, Haplotype) %>%
+    summarise(Count = n(),
+              Freq = n()/unique(Sample_size))
+  
+  haplo_freq_plot = haplo_freqs%>%
+    ggplot(aes(y = Freq, x = Var2, fill = Haplotype))+
+    geom_col(position = 'stack')+
+    facet_grid(Var1~gene_label)+
+    labs(x = variables[2])+
+    theme(legend.position = 'bottom')
+  
+  
+  return(list(Haplotypes = haplotypes,
+              haplo_freqs = haplo_freqs,
+              haplo_freq_plot = haplo_freq_plot))
+  
+}
 
